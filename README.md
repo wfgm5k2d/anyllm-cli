@@ -1,5 +1,31 @@
 # AnyLLM CLI Binary Build Guide
 
+## Cross-Platform Builds (Linux, macOS)
+
+The build process described in this guide is nearly identical for both Linux and macOS. The only difference is the `spc` (static-php-cli) binary itself, which is platform-specific.
+
+-   **For macOS:** The `spc` binary included in this repository is for macOS. You can proceed with the instructions below.
+-   **For Linux:** To build on Linux, you must first replace the `spc` binary with the correct one for your Linux architecture.
+
+**Steps for Linux Build:**
+
+1.  From within your Linux environment, download the appropriate `spc` binary.
+    -   **Linux x86_64:**
+        ```bash
+        curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-x86_64
+        ```
+    -   **Linux aarch64 (ARM):**
+        ```bash
+        curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
+        ```
+2.  Make the new binary executable:
+    ```bash
+    chmod +x ./spc
+    ```
+3.  After that, follow all the steps in this guide exactly as written. The rest of the process is the same.
+
+---
+
 This guide provides step-by-step instructions on how to build a standalone executable binary for the AnyLLM CLI tool. This binary will allow you to run AnyLLM without a system-wide PHP installation, making it highly portable.
 
 ## Why Build a Binary?
