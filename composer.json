@@ -1,0 +1,11 @@
+{
+    "name": "anyllm/cli",
+    "description": "AnyLLM CLI Tool",
+    "type": "project",
+    "require": {},
+    "autoload": {
+        "psr-4": {
+            "AnyllmCli\\": "src/"
+        }
+    }
+}
