@@ -170,3 +170,46 @@ Remember to place your `anyllm.json` configuration file in the same directory wh
 -   **`pkg-config` not found**: Run `./spc doctor --auto-fix` to attempt an automatic fix.
 -   **`phar.readonly` error**: Ensure you run the `php -d phar.readonly=0 ...` command as shown in Step 8.
 -   **Build failures**: If the build fails, try running `rm -rf buildroot source` to clear previous build artifacts and then retry from Step 6. If issues persist, consult the `static-php-cli` documentation or open an issue.
+
+## Configuration (`anyllm.json`)
+
+The `anyllm` binary is configured via an `anyllm.json` file. This file must be placed in the same directory where you run the executable. It allows you to define the AI providers and models that the CLI can use.
+
+### File Structure
+
+The configuration is structured as follows:
+
+```json
+{
+  "provider": {
+    "your_provider_key": {
+      "name": "Human-Readable Name",
+      "type": "openai_compatible",
+      "options": {
+        "baseURL": "https://api.example.com/v1",
+        "header": {
+          "Authorization": "Bearer YOUR_API_KEY"
+        }
+      },
+      "models": {
+        "model-alias": {
+          "name": "actual-model-name-for-api"
+        }
+      }
+    }
+  }
+}
+```
+
+### Key Descriptions
+
+*   `provider`: The root object containing all provider configurations.
+*   `your_provider_key`: A unique key for your provider (e.g., `my_openai`, `local_llama`).
+    *   `name`: (string) A display name for the provider that will appear in the TUI.
+    *   `type`: (string) The API compatibility type. Currently, `openai_compatible` is supported, allowing you to use any service that follows the OpenAI API standard.
+    *   `options`: An object for provider-specific settings.
+        *   `baseURL`: (string) The base URL for the API endpoint.
+        *   `header`: (object, optional) Custom HTTP headers to be sent with each request. This is where you should place your API key in an `Authorization` header.
+    *   `models`: An object listing the available models for this provider.
+        *   `model-alias`: A short name or alias for the model that you will see in the selection menu.
+            *   `name`: (string) The actual model identifier that the API expects.
