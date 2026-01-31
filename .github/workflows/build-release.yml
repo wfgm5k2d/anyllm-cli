@@ -67,21 +67,23 @@ jobs:
         run: ./spc download --for-extensions=curl,json,mbstring,pcntl,posix,phar,tokenizer,sockets,zlib,openssl
 
       - name: Install UPX for smaller binaries
+        if: runner.os == 'Linux'
+        id: install_upx
         run: ./spc install-pkg upx
 
       - name: Build micro.sfx binary
-        run: ./spc build curl,json,mbstring,pcntl,posix,phar,tokenizer,sockets,zlib,openssl --build-micro -I "memory_limit=512M" --with-upx-pack
+        run: ./spc build curl,json,mbstring,pcntl,posix,phar,tokenizer,sockets,zlib,openssl --build-micro -I "memory_limit=512M" ${{ steps.install_upx.outcome == 'success' && '--with-upx-pack' || '' }}
 
       - name: Create PHAR archive
         run: |
           rm -rf build && mkdir -p build
           cp -R src vendor index.php composer.json composer.lock build/
           php -d phar.readonly=0 -r "
-              $pharFile = 'anyllm.phar';
-              $phar = new Phar($pharFile);
-              \$phar->buildFromDirectory('build', '/\.php$/');
-              $phar->setStub($phar->createDefaultStub('index.php'));
-              $phar->compressFiles(Phar::GZ);
+              \$pharFile = 'anyllm.phar';
+              \$phar = new Phar(\$pharFile);
+              \$phar->buildFromDirectory('build', '/\\.php\$/');
+              \$phar->setStub(\$phar->createDefaultStub('index.php'));
+              \$phar->compressFiles(Phar::GZ);
           "
           ls -l anyllm.phar
 
