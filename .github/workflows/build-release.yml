@@ -69,7 +69,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install UPX for smaller binaries
-        if: runner.os == 'Linux'
+        if: matrix.target == 'linux-x86_64'
         id: install_upx
         run: ./spc install-pkg upx
 
