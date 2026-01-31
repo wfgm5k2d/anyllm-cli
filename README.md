@@ -7,7 +7,7 @@ AnyLLM CLI is a powerful command-line tool that allows you to interact with vari
 You can install `anyllm` with a single command. This will download the appropriate binary for your system and place it in `/usr/local/bin`.
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/wfgm5k2d/anyllm-cli/master/install.sh | sh
+curl -sSfL https://anyllm.tech/install.sh | sh
 ```
 *Note: The script may ask for your password (`sudo`) to move the binary to the target directory.*
 
