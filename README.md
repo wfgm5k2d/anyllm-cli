@@ -1,32 +1,45 @@
 # AnyLLM CLI Binary Build Guide
 
-## Cross-Platform Builds (Linux, macOS)
+This guide provides step-by-step instructions on how to build a standalone executable binary for the AnyLLM CLI tool. This binary will allow you to run AnyLLM without a system-wide PHP installation, making it highly portable.
 
-The build process described in this guide is nearly identical for both Linux and macOS. The only difference is the `spc` (static-php-cli) binary itself, which is platform-specific.
+## Quick Start: Download and Run Pre-built Binaries
 
--   **For macOS:** The `spc` binary included in this repository is for macOS. You can proceed with the instructions below.
--   **For Linux:** To build on Linux, you must first replace the `spc` binary with the correct one for your Linux architecture.
+You can download the latest pre-built binaries for Linux and macOS directly from the [GitHub Releases page](https://github.com/wfgm5k2d/anyllm-cli/releases). The release link will change with each new version.
 
-**Steps for Linux Build:**
+1.  **Download the Binary**:
+    Go to the latest release and download the appropriate binary for your operating system and architecture:
+    -   `anyllm-linux-x86_64`
+    -   `anyllm-macos-x86_64`
+    -   `anyllm-macos-aarch64` (for Apple Silicon Macs)
 
-1.  From within your Linux environment, download the appropriate `spc` binary.
-    -   **Linux x86_64:**
-        ```bash
-        curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-x86_64
-        ```
-    -   **Linux aarch64 (ARM):**
-        ```bash
-        curl -fsSL -o spc https://dl.static-php.dev/static-php-cli/spc-bin/nightly/spc-linux-aarch64
-        ```
-2.  Make the new binary executable:
+2.  **Make it Executable**:
+    After downloading, open your terminal, navigate to the directory containing the file, and make it executable. You can also rename it for convenience.
+
     ```bash
-    chmod +x ./spc
+    # For example, on Linux
+    mv anyllm-linux-x86_64 anyllm
+    chmod +x ./anyllm
     ```
-3.  After that, follow all the steps in this guide exactly as written. The rest of the process is the same.
+
+3.  **Special Instructions for macOS Users**:
+    When you first try to run the application on macOS, you may see a warning that it is from an unidentified developer. To resolve this, you need to grant an exception for the app.
+
+    -   Navigate to **System Settings** > **Privacy & Security**.
+    -   Scroll down to the "Security" section.
+    -   You will see a message about "anyllm" being blocked. Click the **"Open Anyway"** button.
+
+    For more detailed instructions, please refer to the official Apple support page: [Open a Mac app from an unidentified developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unidentified-developer-mh40616/mac).
+
+4.  **Run the Application**:
+    Once the file is executable, you can run it from your terminal.
+
+    ```bash
+    ./anyllm
+    ```
+    
+    Remember to create an `anyllm.json` configuration file in the same directory where you run the binary.
 
 ---
-
-This guide provides step-by-step instructions on how to build a standalone executable binary for the AnyLLM CLI tool. This binary will allow you to run AnyLLM without a system-wide PHP installation, making it highly portable.
 
 ## Why Build a Binary?
 
@@ -213,3 +226,16 @@ The configuration is structured as follows:
     *   `models`: An object listing the available models for this provider.
         *   `model-alias`: A short name or alias for the model that you will see in the selection menu.
             *   `name`: (string) The actual model identifier that the API expects.
+
+## Running Tests
+
+To verify the functionality and ensure everything is working as expected, you can run the PHPUnit test suite.
+
+Navigate to the root of the project directory and execute the following command:
+
+```bash
+./vendor/bin/phpunit
+```
+
+This will run all the defined tests and report their status.
+

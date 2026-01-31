@@ -2,10 +2,17 @@
     "name": "anyllm/cli",
     "description": "AnyLLM CLI Tool",
     "type": "project",
-    "require": {},
     "autoload": {
         "psr-4": {
             "AnyllmCli\\": "src/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.5"
     }
 }
