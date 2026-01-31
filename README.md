@@ -1,10 +1,19 @@
-# AnyLLM CLI Binary Build Guide
+# AnyLLM CLI
 
-This guide provides step-by-step instructions on how to build a standalone executable binary for the AnyLLM CLI tool. This binary will allow you to run AnyLLM without a system-wide PHP installation, making it highly portable.
+AnyLLM CLI is a powerful command-line tool that allows you to interact with various Large Language Models (LLMs) from your terminal.
 
-## Quick Start: Download and Run Pre-built Binaries
+## Installation
 
-You can download the latest pre-built binaries for Linux and macOS directly from the [GitHub Releases page](https://github.com/wfgm5k2d/anyllm-cli/releases). The release link will change with each new version.
+You can install `anyllm` with a single command. This will download the appropriate binary for your system and place it in `/usr/local/bin`.
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/wfgm5k2d/anyllm-cli/main/install.sh | sh
+```
+*Note: The script may ask for your password (`sudo`) to move the binary to the target directory.*
+
+## Manual Installation
+
+You can also download the latest pre-built binaries for Linux and macOS directly from the [GitHub Releases page](https://github.com/wfgm5k2d/anyllm-cli/releases). The release link will change with each new version.
 
 1.  **Download the Binary**:
     Go to the latest release and download the appropriate binary for your operating system and architecture:
@@ -38,6 +47,11 @@ You can download the latest pre-built binaries for Linux and macOS directly from
     ```
     
     Remember to create an `anyllm.json` configuration file in the same directory where you run the binary.
+
+---
+# AnyLLM CLI Binary Build Guide
+
+This guide provides step-by-step instructions on how to build a standalone executable binary for the AnyLLM CLI tool. This binary will allow you to run AnyLLM without a system-wide PHP installation, making it highly portable.
 
 ---
 
