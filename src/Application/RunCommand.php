@@ -5,6 +5,7 @@ namespace AnyllmCli\Application;
 use AnyllmCli\Application\Factory\AgentFactory;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
+use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
 use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use AnyllmCli\Infrastructure\Terminal\TerminalManager;
@@ -16,6 +17,7 @@ class RunCommand
     private TerminalManager $terminalManager;
     private TUI $tui;
     private SessionManager $sessionManager;
+    private RepoMapGenerator $repoMapGenerator;
     private bool $isSessionMode = false;
     private SessionContext $sessionContext;
     private bool $isCleanedUp = false;
@@ -41,6 +43,7 @@ class RunCommand
         $this->terminalManager = new TerminalManager();
         $this->tui = new TUI($this->terminalManager, $this->config);
         $this->sessionManager = new SessionManager(getcwd());
+        $this->repoMapGenerator = new RepoMapGenerator(getcwd());
         $this->sessionContext = new SessionContext();
 
         $this->detectSessionMode();
@@ -97,6 +100,9 @@ class RunCommand
             $this->sessionManager->initialize();
             $this->sessionContext = $this->sessionManager->loadSession();
         }
+        
+        // --- Repo Map Generation ---
+        $this->repoMapGenerator->performInitialScan();
         // --------------------------
 
         $selection = $this->tui->selectModelTUI();
@@ -112,13 +118,11 @@ class RunCommand
         Style::info("Using Provider: " . Style::PURPLE . $selection['provider_name'] . Style::RESET);
         Style::info("Using Model:    " . Style::BOLD . $selection['model_key'] . Style::RESET);
 
-        $systemPrompt = $this->getSystemPrompt($this->sessionContext);
-        $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
-
-        $this->startLoop($agent);
+        // The system prompt is now generated inside the loop to have the latest context
+        $this->startLoop($providerConfig, $modelName);
     }
 
-    private function startLoop($agent): void
+    private function startLoop(array $providerConfig, string $modelName): void
     {
         while (true) {
             $input = $this->tui->readInputTUI();
@@ -135,6 +139,10 @@ class RunCommand
             }
 
             $processedInput = $this->tui->processInputFiles($input);
+            
+            // Generate the prompt with the latest context right before execution
+            $systemPrompt = $this->getSystemPrompt($this->sessionContext, $processedInput);
+            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
@@ -148,12 +156,16 @@ class RunCommand
         }
     }
 
-    private function getSystemPrompt(SessionContext $context): string
+    private function getSystemPrompt(SessionContext $context, string $currentInput): string
     {
         $osInfo = php_uname();
         $cwd = getcwd();
+
+        // Generate dynamic repo map based on current input
+        $mapData = $this->repoMapGenerator->generate($currentInput, $context);
+        $context->repo_map = $mapData['repo_map'];
+        $context->code_highlights = $mapData['code_highlights'];
         
-        // Placeholder for the rich XML context. This will be expanded later.
         $sessionXml = $context->toXmlPrompt();
 
         return <<<PROMPT
