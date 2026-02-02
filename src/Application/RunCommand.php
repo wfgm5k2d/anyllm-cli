@@ -156,10 +156,6 @@ class RunCommand
             
             // Generate the prompt with the latest context right before execution
             $systemPrompt = $this->getSystemPrompt($this->sessionContext, $processedInput);
-
-            echo $systemPrompt;
-            exit;
-
             $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;

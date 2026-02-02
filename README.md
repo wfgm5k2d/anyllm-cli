@@ -66,7 +66,7 @@ Building a binary for AnyLLM offers several advantages:
 
 Before you begin, ensure you have the following:
 
-- **PHP 8.1+**: While the final binary won't require a system PHP, you need it for Composer and to create the PHAR archive during the build process.
+- **PHP 8.4+**: While the final binary won't require a system PHP, you need it for Composer and to create the PHAR archive during the build process.
 - **Composer**: Used to manage PHP dependencies.
 - **`static-php-cli` binary (`spc`)**: This tool is essential for building static PHP executables. It's provided within this project.
 - **Basic Build Tools**: `make`, `gcc`/`clang`, `pkg-config` (usually available on Linux/macOS or installed via `spc doctor`).

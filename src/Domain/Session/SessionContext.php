@@ -66,6 +66,29 @@ class SessionContext
             $xml .= "<![CDATA[\n" . $this->knowledge_base['content'] . "\n]]>\n";
             $xml .= "  </knowledge_base>\n";
         }
+
+        if (!empty($this->files['modified']) || !empty($this->files['read'])) {
+            $xml .= "  <files>\n";
+            if (!empty($this->files['modified'])) {
+                $xml .= "    <modified>\n";
+                foreach ($this->files['modified'] as $file) {
+                    $xml .= '      <file path="' . htmlspecialchars($file['path']) . '" status="' . $file['status'] . '" lines="' . $file['lines'] . '">';
+                    $xml .= "<![CDATA[" . htmlspecialchars($file['preview']) . "]]>";
+                    $xml .= "</file>\n";
+                }
+                $xml .= "    </modified>\n";
+            }
+            if (!empty($this->files['read'])) {
+                $xml .= "    <read>\n";
+                foreach ($this->files['read'] as $file) {
+                    $xml .= '      <file path="' . htmlspecialchars($file['path']) . '">';
+                    $xml .= "<![CDATA[" . htmlspecialchars($file['preview']) . "]]>";
+                    $xml .= "</file>\n";
+                }
+                $xml .= "    </read>\n";
+            }
+            $xml .= "  </files>\n";
+        }
         
         // In the future, other blocks like files, terminal etc., will be added here.
 

@@ -94,6 +94,8 @@ abstract class BaseAgent implements AgentInterface
                         echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
                     }
 
+                    $this->updateFileContext($toolName, $arguments, $toolOutput);
+
                     file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $toolOutput . "\n\n", FILE_APPEND);
 
                     $this->sessionContext->conversation_history[] = [
@@ -119,6 +121,48 @@ abstract class BaseAgent implements AgentInterface
 
         if ($loopCount >= $this->maxIterations) {
             Style::error("Agent reached maximum number of iterations ({$this->maxIterations}).");
+        }
+    }
+
+    private function updateFileContext(string $toolName, array $arguments, string $toolOutput): void
+    {
+        $path = $arguments['path'] ?? null;
+        if (!$path) {
+            return;
+        }
+
+        // Helper function to remove existing entries to avoid duplicates
+        $removeExisting = function (string $type, string $path) {
+            $this->sessionContext->files[$type] = array_filter(
+                $this->sessionContext->files[$type],
+                fn ($file) => $file['path'] !== $path
+            );
+        };
+
+        switch ($toolName) {
+            case 'write_file':
+                $content = $arguments['content'] ?? '';
+                $status = file_exists(getcwd() . DIRECTORY_SEPARATOR . $path) ? 'modified' : 'created';
+                $preview = mb_substr($content, 0, 200) . (mb_strlen($content) > 200 ? '...' : '');
+
+                $removeExisting('modified', $path);
+                $this->sessionContext->files['modified'][] = [
+                    'path' => $path,
+                    'status' => $status,
+                    'lines' => count(explode("\n", $content)),
+                    'preview' => $preview,
+                ];
+                break;
+
+            case 'read_file':
+                $preview = mb_substr($toolOutput, 0, 200) . (mb_strlen($toolOutput) > 200 ? '...' : '');
+
+                $removeExisting('read', $path);
+                $this->sessionContext->files['read'][] = [
+                    'path' => $path,
+                    'preview' => $preview,
+                ];
+                break;
         }
     }
 }
