@@ -60,6 +60,12 @@ class SessionContext
             $xml .= "<![CDATA[\n" . $this->code_highlights . "\n]]>\n";
             $xml .= "  </code_highlights>\n";
         }
+
+        if ($this->knowledge_base) {
+            $xml .= '  <knowledge_base file="' . htmlspecialchars($this->knowledge_base['path']) . '">' . "\n";
+            $xml .= "<![CDATA[\n" . $this->knowledge_base['content'] . "\n]]>\n";
+            $xml .= "  </knowledge_base>\n";
+        }
         
         // In the future, other blocks like files, terminal etc., will be added here.
 

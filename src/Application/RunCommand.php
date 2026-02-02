@@ -6,6 +6,7 @@ use AnyllmCli\Application\Factory\AgentFactory;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
 use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
+use AnyllmCli\Infrastructure\Service\KnowledgeBaseService;
 use AnyllmCli\Infrastructure\Service\ProjectIdentifierService;
 use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
@@ -20,6 +21,7 @@ class RunCommand
     private SessionManager $sessionManager;
     private RepoMapGenerator $repoMapGenerator;
     private ProjectIdentifierService $projectIdentifierService;
+    private KnowledgeBaseService $knowledgeBaseService;
     private bool $isSessionMode = false;
     private SessionContext $sessionContext;
     private bool $isCleanedUp = false;
@@ -47,6 +49,7 @@ class RunCommand
         $this->sessionManager = new SessionManager(getcwd());
         $this->repoMapGenerator = new RepoMapGenerator(getcwd());
         $this->projectIdentifierService = new ProjectIdentifierService(getcwd());
+        $this->knowledgeBaseService = new KnowledgeBaseService(getcwd());
         $this->sessionContext = new SessionContext();
 
         $this->detectSessionMode();
@@ -109,6 +112,9 @@ class RunCommand
             $this->sessionContext->project = $this->projectIdentifierService->identify();
         }
 
+        // --- Knowledge Base ---
+        $this->sessionContext->knowledge_base = $this->knowledgeBaseService->findKnowledge();
+
         // --- Repo Map Generation ---
         $this->repoMapGenerator->performInitialScan();
         // --------------------------
@@ -150,6 +156,10 @@ class RunCommand
             
             // Generate the prompt with the latest context right before execution
             $systemPrompt = $this->getSystemPrompt($this->sessionContext, $processedInput);
+
+            echo $systemPrompt;
+            exit;
+
             $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
