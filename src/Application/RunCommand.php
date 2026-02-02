@@ -6,6 +6,7 @@ use AnyllmCli\Application\Factory\AgentFactory;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
 use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
+use AnyllmCli\Infrastructure\Service\ProjectIdentifierService;
 use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use AnyllmCli\Infrastructure\Terminal\TerminalManager;
@@ -18,6 +19,7 @@ class RunCommand
     private TUI $tui;
     private SessionManager $sessionManager;
     private RepoMapGenerator $repoMapGenerator;
+    private ProjectIdentifierService $projectIdentifierService;
     private bool $isSessionMode = false;
     private SessionContext $sessionContext;
     private bool $isCleanedUp = false;
@@ -44,6 +46,7 @@ class RunCommand
         $this->tui = new TUI($this->terminalManager, $this->config);
         $this->sessionManager = new SessionManager(getcwd());
         $this->repoMapGenerator = new RepoMapGenerator(getcwd());
+        $this->projectIdentifierService = new ProjectIdentifierService(getcwd());
         $this->sessionContext = new SessionContext();
 
         $this->detectSessionMode();
@@ -100,7 +103,12 @@ class RunCommand
             $this->sessionManager->initialize();
             $this->sessionContext = $this->sessionManager->loadSession();
         }
-        
+
+        // --- Project Identification ---
+        if ($this->sessionContext->isNewSession) {
+            $this->sessionContext->project = $this->projectIdentifierService->identify();
+        }
+
         // --- Repo Map Generation ---
         $this->repoMapGenerator->performInitialScan();
         // --------------------------

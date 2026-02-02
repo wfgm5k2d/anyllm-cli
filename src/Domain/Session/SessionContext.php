@@ -43,6 +43,9 @@ class SessionContext
             $xml .= "  <project>\n";
             $xml .= "    <name>" . htmlspecialchars($this->project['name']) . "</name>\n";
             $xml .= "    <path>" . htmlspecialchars($this->project['path']) . "</path>\n";
+            if (!empty($this->project['entry_point'])) {
+                $xml .= "    <entry_point>" . htmlspecialchars($this->project['entry_point']) . "</entry_point>\n";
+            }
             $xml .= "  </project>\n";
         }
 
