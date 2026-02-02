@@ -5,27 +5,31 @@ declare(strict_types=1);
 namespace AnyllmCli\Domain\Agent;
 
 use AnyllmCli\Domain\Api\ApiClientInterface;
+use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Domain\Tool\ToolRegistryInterface;
 use AnyllmCli\Infrastructure\Terminal\DiffRenderer;
 use AnyllmCli\Infrastructure\Terminal\Style;
 
 abstract class BaseAgent implements AgentInterface
 {
-    protected array $history = [];
     protected int $maxIterations = 10;
 
     public function __construct(
         protected ApiClientInterface $apiClient,
         protected ToolRegistryInterface $toolRegistry,
         protected DiffRenderer $diffRenderer,
-        string $systemPrompt
+        string $systemPrompt,
+        protected SessionContext $sessionContext
     ) {
-        $this->history[] = ['role' => 'system', 'content' => $systemPrompt];
+        // Ensure system prompt is the first message, and only if history is empty.
+        if (empty($this->sessionContext->conversation_history) || $this->sessionContext->conversation_history[0]['role'] !== 'system') {
+            array_unshift($this->sessionContext->conversation_history, ['role' => 'system', 'content' => $systemPrompt]);
+        }
     }
 
     public function execute(string $prompt, callable $onProgress): void
     {
-        $this->history[] = ['role' => 'user', 'content' => $prompt];
+        $this->sessionContext->conversation_history[] = ['role' => 'user', 'content' => $prompt];
 
         $loopCount = 0;
         $keepGoing = true;
@@ -34,7 +38,7 @@ abstract class BaseAgent implements AgentInterface
             $loopCount++;
 
             $response = $this->apiClient->chat(
-                $this->history,
+                $this->sessionContext->conversation_history,
                 $this->toolRegistry->getToolsAsJsonSchema(),
                 $onProgress
             );
@@ -52,7 +56,7 @@ abstract class BaseAgent implements AgentInterface
                 continue;
             }
 
-            $this->history[] = $response->getMessage();
+            $this->sessionContext->conversation_history[] = $response->getMessage();
             $toolCalls = $response->getToolCalls();
 
             $onProgress(PHP_EOL);
@@ -92,7 +96,7 @@ abstract class BaseAgent implements AgentInterface
 
                     file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $toolOutput . "\n\n", FILE_APPEND);
 
-                    $this->history[] = [
+                    $this->sessionContext->conversation_history[] = [
                         'role' => 'tool',
                         'tool_call_id' => $toolCall['id'],
                         'name' => $toolName,
@@ -102,7 +106,7 @@ abstract class BaseAgent implements AgentInterface
                 } else {
                     $errorOutput = "Error: Tool '{$toolName}' not found.";
                     file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $errorOutput . "\n\n", FILE_APPEND);
-                    $this->history[] = [
+                    $this->sessionContext->conversation_history[] = [
                         'role' => 'tool',
                         'tool_call_id' => $toolCall['id'],
                         'name' => $toolName,

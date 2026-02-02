@@ -7,6 +7,7 @@ namespace AnyllmCli\Application\Factory;
 use AnyllmCli\Application\Agent\GeminiAgent;
 use AnyllmCli\Application\Agent\OpenAiAgent;
 use AnyllmCli\Domain\Agent\AgentInterface;
+use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Api\Adapter\GeminiClient;
 use AnyllmCli\Infrastructure\Api\Adapter\OpenAiClient;
 use AnyllmCli\Infrastructure\Terminal\DiffRenderer;
@@ -20,8 +21,12 @@ use RuntimeException;
 
 class AgentFactory
 {
-    public static function create(array $providerConfig, string $modelName, string $systemPrompt): AgentInterface
-    {
+    public static function create(
+        array $providerConfig,
+        string $modelName,
+        string $systemPrompt,
+        SessionContext $sessionContext
+    ): AgentInterface {
         $providerType = $providerConfig['type'] ?? 'openai';
 
         // 1. Create the Tool Registry and register all tools
@@ -38,12 +43,12 @@ class AgentFactory
         // 3. Create the appropriate API client and Agent
         if ($providerType === 'google') {
             $apiClient = new GeminiClient($providerConfig, $modelName);
-            return new GeminiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt);
+            return new GeminiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt, $sessionContext);
         }
 
         if ($providerType === 'openai' || $providerType === 'openai_compatible') {
             $apiClient = new OpenAiClient($providerConfig, $modelName);
-            return new OpenAiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt);
+            return new OpenAiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt, $sessionContext);
         }
 
         throw new RuntimeException("Unsupported provider type: {$providerType}");

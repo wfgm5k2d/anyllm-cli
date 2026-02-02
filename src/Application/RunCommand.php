@@ -3,7 +3,9 @@
 namespace AnyllmCli\Application;
 
 use AnyllmCli\Application\Factory\AgentFactory;
+use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
+use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use AnyllmCli\Infrastructure\Terminal\TerminalManager;
 use AnyllmCli\Infrastructure\Terminal\TUI;
@@ -13,6 +15,10 @@ class RunCommand
     private AnylmJsonConfig $config;
     private TerminalManager $terminalManager;
     private TUI $tui;
+    private SessionManager $sessionManager;
+    private bool $isSessionMode = false;
+    private SessionContext $sessionContext;
+    private bool $isCleanedUp = false;
 
     public function __construct()
     {
@@ -34,8 +40,46 @@ class RunCommand
         $this->config = new AnylmJsonConfig();
         $this->terminalManager = new TerminalManager();
         $this->tui = new TUI($this->terminalManager, $this->config);
+        $this->sessionManager = new SessionManager(getcwd());
+        $this->sessionContext = new SessionContext();
 
-        register_shutdown_function([$this->terminalManager, 'restoreMode']);
+        $this->detectSessionMode();
+        $this->setupSignalHandler();
+        register_shutdown_function([$this, 'performCleanup']);
+    }
+
+    private function setupSignalHandler(): void
+    {
+        if (function_exists('pcntl_signal')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGINT, [$this, 'handleSigint']);
+        }
+    }
+
+    public function handleSigint(): never
+    {
+        echo PHP_EOL . Style::GRAY . "Ctrl+C detected. Shutting down gracefully..." . Style::RESET . PHP_EOL;
+        $this->performCleanup();
+        exit();
+    }
+
+    public function performCleanup(): void
+    {
+        if ($this->isCleanedUp) {
+            return;
+        }
+        $this->terminalManager->restoreMode();
+        if ($this->isSessionMode) {
+            $this->sessionManager->saveSession($this->sessionContext);
+        }
+        $this->isCleanedUp = true;
+    }
+
+    private function detectSessionMode(): void
+    {
+        $sessionFlagFound = in_array('--session', $_SERVER['argv'], true);
+        $sessionInConfig = $this->config->get('session', false) === true;
+        $this->isSessionMode = $sessionFlagFound || $sessionInConfig;
     }
 
     public function run(): void
@@ -46,6 +90,14 @@ class RunCommand
             Style::error("No providers configured in anyllm.json");
             exit(1);
         }
+
+        // --- Session Handling ---
+        if ($this->isSessionMode) {
+            Style::info("Session mode enabled. Context will be loaded and saved.");
+            $this->sessionManager->initialize();
+            $this->sessionContext = $this->sessionManager->loadSession();
+        }
+        // --------------------------
 
         $selection = $this->tui->selectModelTUI();
 
@@ -60,8 +112,8 @@ class RunCommand
         Style::info("Using Provider: " . Style::PURPLE . $selection['provider_name'] . Style::RESET);
         Style::info("Using Model:    " . Style::BOLD . $selection['model_key'] . Style::RESET);
 
-        $systemPrompt = $this->getSystemPrompt();
-        $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt);
+        $systemPrompt = $this->getSystemPrompt($this->sessionContext);
+        $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
 
         $this->startLoop($agent);
     }
@@ -96,16 +148,24 @@ class RunCommand
         }
     }
 
-    private function getSystemPrompt(): string
+    private function getSystemPrompt(SessionContext $context): string
     {
         $osInfo = php_uname();
         $cwd = getcwd();
+        
+        // Placeholder for the rich XML context. This will be expanded later.
+        $sessionXml = $context->toXmlPrompt();
+
         return <<<PROMPT
 You are a powerful AI assistant running in a CLI on a user's local machine. Your primary function is to execute user requests by calling functions to interact with the local filesystem.
 
 **System Information:**
 - Operating System: $osInfo
 - Current Working Directory: $cwd
+
+**SESSION CONTEXT:**
+This block contains the summary of the project and conversation history. Use it to understand the user's goals.
+$sessionXml
 
 **CRITICAL INSTRUCTIONS:**
 1.  You MUST use the provided tools (functions) to interact with the filesystem. Do not ask the user for permission; you are expected to use them.
@@ -116,3 +176,4 @@ You are a powerful AI assistant running in a CLI on a user's local machine. Your
 PROMPT;
     }
 }
+

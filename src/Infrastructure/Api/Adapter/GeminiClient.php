@@ -44,7 +44,11 @@ class GeminiClient implements ApiClientInterface
             if ($role === 'tool') {
                 $contents[] = [
                     'role' => 'user',
-                    'parts' => [['functionResponse' => ['name' => $message['name'], 'response' => json_decode((string) $message['content'], true)]]],
+                    'parts' => [['functionResponse' => [
+                        'name' => $message['name'],
+                        // Wrap the raw string output in a JSON object structure
+                        'response' => ['content' => (string) $message['content']]
+                    ]]],
                 ];
                 continue;
             }
@@ -52,7 +56,16 @@ class GeminiClient implements ApiClientInterface
             if (isset($message['tool_calls'])) {
                 $parts = [];
                 foreach ($message['tool_calls'] as $toolCall) {
-                    $parts[] = ['functionCall' => ['name' => $toolCall['function']['name'], 'args' => json_decode((string) $toolCall['function']['arguments'], true) ?? new stdClass()]];
+                    $decodedArgs = json_decode((string) $toolCall['function']['arguments'], true) ?? [];
+                    // If args are empty, ensure it's an object {} not an array []
+                    if (empty($decodedArgs)) {
+                        $decodedArgs = new stdClass();
+                    }
+
+                    $parts[] = ['functionCall' => [
+                        'name' => $toolCall['function']['name'],
+                        'args' => $decodedArgs
+                    ]];
                 }
                 $contents[] = ['role' => 'model', 'parts' => $parts];
                 continue;
