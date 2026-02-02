@@ -12,10 +12,27 @@ class GeminiResponse implements ApiResponseInterface
 
     public function __construct(string $jsonResponse)
     {
-        // Gemini streams multiple JSON objects, we only care about the last one
-        $jsonObjects = explode('data: ', $jsonResponse);
-        $lastJson = trim(end($jsonObjects));
-        $this->data = json_decode($lastJson, true) ?? [];
+        $this->data = [];
+        $lines = explode("\n", $jsonResponse);
+
+        $fullContent = [];
+
+        foreach ($lines as $line) {
+            if (strpos($line, 'data: ') === 0) {
+                $jsonStr = substr($line, 6);
+                $chunk = json_decode($jsonStr, true);
+
+                if (isset($chunk['candidates'][0]['content'])) {
+                    $fullContent[] = $chunk['candidates'][0]['content'];
+                }
+            }
+        }
+
+        // Combine the parts from all chunks into a single content structure
+        if (!empty($fullContent)) {
+            $this->data['candidates'][0]['content']['parts'] = array_merge(...array_column($fullContent, 'parts'));
+            $this->data['candidates'][0]['content']['role'] = 'model';
+        }
     }
 
     public function getMessageContent(): ?string

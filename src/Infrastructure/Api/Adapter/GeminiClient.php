@@ -43,15 +43,8 @@ class GeminiClient implements ApiClientInterface
 
             if ($role === 'tool') {
                 $contents[] = [
-                    'role' => 'user', // In Gemini, tool responses are from the user
-                    'parts' => [
-                        [
-                            'functionResponse' => [
-                                'name' => $message['name'],
-                                'response' => json_decode((string) $message['content'], true),
-                            ],
-                        ],
-                    ],
+                    'role' => 'user',
+                    'parts' => [['functionResponse' => ['name' => $message['name'], 'response' => json_decode((string) $message['content'], true)]]],
                 ];
                 continue;
             }
@@ -59,22 +52,14 @@ class GeminiClient implements ApiClientInterface
             if (isset($message['tool_calls'])) {
                 $parts = [];
                 foreach ($message['tool_calls'] as $toolCall) {
-                    $parts[] = [
-                        'functionCall' => [
-                            'name' => $toolCall['function']['name'],
-                            'args' => json_decode((string) $toolCall['function']['arguments'], true) ?? new stdClass(),
-                        ]
-                    ];
+                    $parts[] = ['functionCall' => ['name' => $toolCall['function']['name'], 'args' => json_decode((string) $toolCall['function']['arguments'], true) ?? new stdClass()]];
                 }
                 $contents[] = ['role' => 'model', 'parts' => $parts];
                 continue;
             }
 
             if (isset($message['content'])) {
-                $contents[] = [
-                    'role' => $role,
-                    'parts' => [['text' => $message['content']]]
-                ];
+                $contents[] = ['role' => $role, 'parts' => [['text' => $message['content']]]];
             }
         }
 
@@ -106,13 +91,18 @@ class GeminiClient implements ApiClientInterface
 
         $responseContent = "";
         $errorBuffer = "";
+        $responseStarted = false;
 
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, $onProgress) {
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, $onProgress, &$responseStarted) {
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
             if ($code >= 400) {
                 $errorBuffer .= $data;
                 return strlen($data);
+            }
+
+            if (!$responseStarted) {
+                $responseStarted = true;
+                Style::clearLine();
             }
 
             $responseContent .= $data;
@@ -133,17 +123,35 @@ class GeminiClient implements ApiClientInterface
             return strlen($data);
         });
 
-        curl_exec($ch);
+        $mh = curl_multi_init();
+        curl_multi_add_handle($mh, $ch);
+        $active = null;
+        $animFrame = 0;
+        $anim = ['.', '..', '...'];
+
+        do {
+            $status = curl_multi_exec($mh, $active);
+            if (!$responseStarted && curl_getinfo($ch, CURLINFO_HTTP_CODE) < 400) {
+                Style::clearLine();
+                echo Style::GRAY . "Think" . $anim[$animFrame++ % 3] . Style::RESET;
+                usleep(200000);
+            } else {
+                curl_multi_select($mh, 0.1);
+            }
+        } while ($active && $status == CURLM_OK);
+
 
         if (curl_errno($ch)) {
             $err = curl_error($ch);
-            curl_close($ch);
+            curl_multi_remove_handle($mh, $ch);
+            curl_multi_close($mh);
             Style::errorBox("Network Error:\n$err");
             return new GeminiResponse('{}');
         }
 
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_multi_close($mh);
 
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";

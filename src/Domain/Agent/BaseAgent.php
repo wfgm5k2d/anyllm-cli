@@ -68,11 +68,12 @@ abstract class BaseAgent implements AgentInterface
                     // Display tool output to the user
                     echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
                 } else {
+                    $errorOutput = "Error: Tool '{$toolName}' not found.";
                     $this->history[] = [
                         'role' => 'tool',
                         'tool_call_id' => $toolCall['id'],
                         'name' => $toolName,
-                        'content' => "Error: Tool '{$toolName}' not found.",
+                        'content' => $errorOutput,
                     ];
                     Style::error("Tool '{$toolName}' not found.");
                 }

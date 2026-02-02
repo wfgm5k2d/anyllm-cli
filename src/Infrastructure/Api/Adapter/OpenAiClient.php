@@ -42,7 +42,7 @@ class OpenAiClient implements ApiClientInterface
         $payload = [
             'model' => $this->modelName,
             'messages' => $messages,
-            'stream' => true
+            'stream' => true,
         ];
 
         if (!empty($tools)) {
@@ -54,13 +54,19 @@ class OpenAiClient implements ApiClientInterface
 
         $responseContent = "";
         $errorBuffer = "";
+        $responseStarted = false;
 
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, $onProgress) {
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, $onProgress, &$responseStarted) {
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
             if ($code >= 400) {
                 $errorBuffer .= $data;
                 return strlen($data);
+            }
+
+            if (!$responseStarted) {
+                $responseStarted = true;
+                Style::clearLine();
             }
 
             $responseContent .= $data;
@@ -83,18 +89,34 @@ class OpenAiClient implements ApiClientInterface
             return strlen($data);
         });
 
-        $response = curl_exec($ch);
+        $mh = curl_multi_init();
+        curl_multi_add_handle($mh, $ch);
+        $active = null;
+        $animFrame = 0;
+        $anim = ['.', '..', '...'];
+
+        do {
+            $status = curl_multi_exec($mh, $active);
+            if (!$responseStarted && curl_getinfo($ch, CURLINFO_HTTP_CODE) < 400) {
+                Style::clearLine();
+                echo Style::GRAY . "Think" . $anim[$animFrame++ % 3] . Style::RESET;
+                usleep(200000);
+            } else {
+                curl_multi_select($mh, 0.1);
+            }
+        } while ($active && $status == CURLM_OK);
 
         if (curl_errno($ch)) {
             $err = curl_error($ch);
-            curl_close($ch);
+            curl_multi_remove_handle($mh, $ch);
+            curl_multi_close($mh);
             Style::errorBox("Network Error:\n$err");
-            // Return an empty response on error
             return new OpenAiResponse('{}');
         }
 
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_multi_close($mh);
 
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";
@@ -108,7 +130,6 @@ class OpenAiClient implements ApiClientInterface
             return new OpenAiResponse('{}');
         }
 
-        // The full response content is now in $responseContent
         return new OpenAiResponse($responseContent);
     }
 }
