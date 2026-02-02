@@ -100,7 +100,7 @@ class GeminiClient implements ApiClientInterface
         $errorBuffer = "";
         $responseStarted = false;
 
-        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, $onProgress, &$responseStarted) {
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use (&$responseContent, &$errorBuffer, &$responseStarted) {
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             if ($code >= 400) {
                 $errorBuffer .= $data;
@@ -113,20 +113,6 @@ class GeminiClient implements ApiClientInterface
             }
 
             $responseContent .= $data;
-
-            foreach (explode("\n", $data) as $line) {
-                $line = trim($line);
-                if (strpos($line, 'data: ') === 0) {
-                    $jsonStr = substr($line, 6);
-                    $json = json_decode($jsonStr, true);
-                    if (isset($json['candidates'][0]['content']['parts'][0]['text'])) {
-                        $chunk = $json['candidates'][0]['content']['parts'][0]['text'];
-                        if ($onProgress) {
-                            $onProgress($chunk);
-                        }
-                    }
-                }
-            }
             return strlen($data);
         });
 
@@ -178,6 +164,18 @@ class GeminiClient implements ApiClientInterface
             }
             Style::errorBox($errorMsg);
             return new GeminiResponse('{}');
+        }
+
+        // Simulate streaming for the onProgress callback
+        if ($onProgress) {
+            $decodedArray = json_decode($responseContent, true);
+            if (is_array($decodedArray)) {
+                foreach ($decodedArray as $chunk) {
+                    if (isset($chunk['candidates'][0]['content']['parts'][0]['text'])) {
+                        $onProgress($chunk['candidates'][0]['content']['parts'][0]['text']);
+                    }
+                }
+            }
         }
 
         return new GeminiResponse($responseContent);

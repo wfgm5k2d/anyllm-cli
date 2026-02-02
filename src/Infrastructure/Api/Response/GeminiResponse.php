@@ -13,24 +13,46 @@ class GeminiResponse implements ApiResponseInterface
     public function __construct(string $jsonResponse)
     {
         $this->data = [];
-        $lines = explode("\n", $jsonResponse);
-
         $fullContent = [];
+        $responseChunks = [];
 
-        foreach ($lines as $line) {
-            if (strpos($line, 'data: ') === 0) {
-                $jsonStr = substr($line, 6);
-                $chunk = json_decode($jsonStr, true);
+        // The official Gemini API returns a JSON array, not a standard SSE stream.
+        // We first try to decode it as a single JSON array.
+        $decodedArray = json_decode($jsonResponse, true);
 
-                if (isset($chunk['candidates'][0]['content'])) {
-                    $fullContent[] = $chunk['candidates'][0]['content'];
+        if (is_array($decodedArray) && isset($decodedArray[0]['candidates'])) {
+            // It's a JSON array of chunks
+            $responseChunks = $decodedArray;
+        } else {
+            // Fallback for a potential SSE-like stream (data: prefix)
+            $lines = explode("\n", $jsonResponse);
+            foreach ($lines as $line) {
+                if (strpos($line, 'data: ') === 0) {
+                    $jsonStr = substr($line, 6);
+                    $chunk = json_decode($jsonStr, true);
+                    if ($chunk) {
+                        $responseChunks[] = $chunk;
+                    }
                 }
+            }
+        }
+
+        // Process the collected chunks
+        foreach ($responseChunks as $chunk) {
+            if (isset($chunk['candidates'][0]['content'])) {
+                $fullContent[] = $chunk['candidates'][0]['content'];
             }
         }
 
         // Combine the parts from all chunks into a single content structure
         if (!empty($fullContent)) {
-            $this->data['candidates'][0]['content']['parts'] = array_merge(...array_column($fullContent, 'parts'));
+            $allParts = [];
+            foreach ($fullContent as $content) {
+                if(isset($content['parts'])) {
+                    $allParts = array_merge($allParts, $content['parts']);
+                }
+            }
+            $this->data['candidates'][0]['content']['parts'] = $allParts;
             $this->data['candidates'][0]['content']['role'] = 'model';
         }
     }
