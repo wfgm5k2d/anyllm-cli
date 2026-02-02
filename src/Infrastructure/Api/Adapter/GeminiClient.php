@@ -74,6 +74,13 @@ class GeminiClient implements ApiClientInterface
             $payload['tools'] = [['functionDeclarations' => $geminiTools]];
         }
 
+        $jsonPayload = json_encode($payload);
+        file_put_contents(
+            getcwd() . '/llm_log.txt',
+            "--- Gemini Request ---\n" . json_encode($payload, JSON_PRETTY_PRINT) . "\n\n",
+            FILE_APPEND
+        );
+
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
@@ -87,7 +94,7 @@ class GeminiClient implements ApiClientInterface
             $headers[] = 'Content-Type: application/json';
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
 
         $responseContent = "";
         $errorBuffer = "";
@@ -152,6 +159,14 @@ class GeminiClient implements ApiClientInterface
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_multi_remove_handle($mh, $ch);
         curl_multi_close($mh);
+
+        $log = "--- Gemini Response (HTTP {$httpCode}) ---\n";
+        if ($httpCode >= 400) {
+            $log .= "Error Buffer: " . $errorBuffer . "\n";
+        } else {
+            $log .= "Raw Content: " . $responseContent . "\n";
+        }
+        file_put_contents(getcwd() . '/llm_log.txt', $log . "\n\n", FILE_APPEND);
 
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";

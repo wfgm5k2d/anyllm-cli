@@ -50,7 +50,14 @@ class OpenAiClient implements ApiClientInterface
             $payload['tool_choice'] = 'auto';
         }
 
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+        $jsonPayload = json_encode($payload);
+        file_put_contents(
+            getcwd() . '/llm_log.txt',
+            "--- OpenAI Request ---\n" . json_encode($payload, JSON_PRETTY_PRINT) . "\n\n",
+            FILE_APPEND
+        );
+
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
 
         $responseContent = "";
         $errorBuffer = "";
@@ -117,6 +124,14 @@ class OpenAiClient implements ApiClientInterface
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_multi_remove_handle($mh, $ch);
         curl_multi_close($mh);
+
+        $log = "--- OpenAI Response (HTTP {$httpCode}) ---\n";
+        if ($httpCode >= 400) {
+            $log .= "Error Buffer: " . $errorBuffer . "\n";
+        } else {
+            $log .= "Raw Content: " . $responseContent . "\n";
+        }
+        file_put_contents(getcwd() . '/llm_log.txt', $log . "\n\n", FILE_APPEND);
 
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";
