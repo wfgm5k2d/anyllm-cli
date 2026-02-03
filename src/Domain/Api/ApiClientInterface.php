@@ -7,4 +7,6 @@ namespace AnyllmCli\Domain\Api;
 interface ApiClientInterface
 {
     public function chat(array $messages, array $tools, ?callable $onProgress): ApiResponseInterface;
+
+    public function simpleChat(array $messages): ?array;
 }

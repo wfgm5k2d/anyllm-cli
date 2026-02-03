@@ -5,3 +5,8 @@ source
 pkgroot
 downloads
 buildroot
+log
+*.log
+.anyllm
+spc
+*.json

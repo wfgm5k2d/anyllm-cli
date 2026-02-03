@@ -193,4 +193,70 @@ class GeminiClient implements ApiClientInterface
 
         return new GeminiResponse($responseContent);
     }
+
+    public function simpleChat(array $messages): ?array
+    {
+        // Use the non-streaming endpoint for Gemini
+        $url = rtrim($this->config['baseURL'], '/') . "/v1beta/models/{$this->modelName}:generateContent";
+
+        // Payload construction is similar to the streaming one
+        $payload = [];
+        $contents = [];
+        $systemInstruction = null;
+
+        foreach ($messages as $message) {
+             if ($message['role'] === 'system') {
+                $systemInstruction = ['parts' => [['text' => $message['content']]]];
+            } else {
+                // Gemini uses 'model' for assistant role
+                $role = $message['role'] === 'assistant' ? 'model' : $message['role'];
+                $contents[] = ['role' => $role, 'parts' => [['text' => $message['content']]]];
+            }
+        }
+        $payload['contents'] = $contents;
+        if ($systemInstruction) {
+            $payload['system_instruction'] = $systemInstruction;
+        }
+        // Add generationConfig to enforce JSON output for Gemini
+        $payload['generationConfig'] = [
+            'responseMimeType' => 'application/json',
+        ];
+
+        $jsonPayload = json_encode($payload);
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+
+        $headers = [];
+        $confHeaders = $this->config['headers'] ?? $this->config['header'] ?? [];
+        foreach ($confHeaders as $k => $v) {
+            $headers[] = "$k: $v";
+        }
+        if (empty($confHeaders['Content-Type'])) {
+            $headers[] = 'Content-Type: application/json';
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($httpCode >= 400 || $response === false) {
+            Style::errorBox("Task analysis API call failed. HTTP Code: {$httpCode}\nError: {$error}\nResponse: " . substr((string)$response, 0, 500));
+            return null;
+        }
+
+        $decoded = json_decode($response, true);
+        // Gemini should return the JSON object directly in the 'text' part
+        $content = $decoded['candidates'][0]['content']['parts'][0]['text'] ?? null;
+        if (!$content) {
+            return null;
+        }
+
+        // The response text itself is expected to be a JSON string, which we decode again
+        return json_decode($content, true);
+    }
 }

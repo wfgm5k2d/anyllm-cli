@@ -12,15 +12,17 @@ use AnyllmCli\Infrastructure\Terminal\Style;
 
 abstract class BaseAgent implements AgentInterface
 {
-    protected int $maxIterations = 10;
+    protected int $maxIterations;
 
     public function __construct(
         protected ApiClientInterface $apiClient,
         protected ToolRegistryInterface $toolRegistry,
         protected DiffRenderer $diffRenderer,
         string $systemPrompt,
-        protected SessionContext $sessionContext
+        protected SessionContext $sessionContext,
+        int $maxIterations = 10
     ) {
+        $this->maxIterations = $maxIterations;
         // Ensure system prompt is the first message, and only if history is empty.
         if (empty($this->sessionContext->conversation_history) || $this->sessionContext->conversation_history[0]['role'] !== 'system') {
             array_unshift($this->sessionContext->conversation_history, ['role' => 'system', 'content' => $systemPrompt]);
@@ -64,6 +66,23 @@ abstract class BaseAgent implements AgentInterface
             foreach ($toolCalls as $toolCall) {
                 $toolName = $toolCall['function']['name'];
                 $arguments = json_decode($toolCall['function']['arguments'], true);
+
+                // --- Intercept internal to-do commands ---
+                if (in_array($toolName, ['add_todo', 'mark_todo_done', 'list_todos'])) {
+                    $toolSummaryForLlm = $this->handleTodoCommand($toolName, $arguments);
+                    echo Style::GRAY . "│ " . Style::CYAN . "Internal: " . trim($toolSummaryForLlm) . Style::RESET . PHP_EOL;
+
+                    $this->sessionContext->conversation_history[] = [
+                        'role' => 'tool',
+                        'tool_call_id' => $toolCall['id'],
+                        'name' => $toolName,
+                        'content' => $toolSummaryForLlm,
+                    ];
+                    // Update current context after internal command
+                    $this->updateCurrentContext($toolName, $arguments, $toolSummaryForLlm);
+                    continue; // Skip the rest of the loop for this tool call
+                }
+                // --- End interception ---
 
                 $log = "--- Tool Execution ---\n";
                 $log .= "Tool Name: " . $toolName . "\n";
@@ -120,6 +139,7 @@ abstract class BaseAgent implements AgentInterface
                     }
 
                     $this->updateFileContext($toolName, $arguments, $toolOutput);
+                    $this->updateCurrentContext($toolName, $arguments, $toolOutput);
 
                     file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $toolOutput . "\n\n", FILE_APPEND);
 
@@ -147,6 +167,89 @@ abstract class BaseAgent implements AgentInterface
         if ($loopCount >= $this->maxIterations) {
             Style::error("Agent reached maximum number of iterations ({$this->maxIterations}).");
         }
+    }
+
+    private function handleTodoCommand(string $toolName, array $arguments): string
+    {
+        switch ($toolName) {
+            case 'add_todo':
+                $text = $arguments['text'] ?? null;
+                if (!$text) {
+                    return "Error: Task text is required to add a to-do.";
+                }
+                // Avoid adding duplicate tasks
+                foreach ($this->sessionContext->todo as $item) {
+                    if ($item['text'] === $text) {
+                        return "Task '{$text}' already exists in the to-do list.";
+                    }
+                }
+                $this->sessionContext->todo[] = ['text' => $text, 'status' => 'pending'];
+                return "Task '{$text}' added to the to-do list.";
+
+            case 'mark_todo_done':
+                $text = $arguments['text'] ?? null;
+                if (!$text) {
+                    return "Error: Task text is required to mark a to-do as done.";
+                }
+                $found = false;
+                foreach ($this->sessionContext->todo as &$item) {
+                    if ($item['text'] === $text) {
+                        $item['status'] = 'done';
+                        $found = true;
+                        break;
+                    }
+                }
+                unset($item); // Unset reference
+                return $found ? "Task '{$text}' marked as done." : "Error: Task '{$text}' not found in the to-do list.";
+
+            case 'list_todos':
+                if (empty($this->sessionContext->todo)) {
+                    return "The to-do list is empty.";
+                }
+                $list = "Current To-Do List:\n";
+                foreach ($this->sessionContext->todo as $item) {
+                    $statusIcon = $item['status'] === 'done' ? '[x]' : '[ ]';
+                    $list .= "- {$statusIcon} {$item['text']}\n";
+                }
+                return $list;
+        }
+        return "Error: Unknown to-do command '{$toolName}'.";
+    }
+
+    private function updateCurrentContext(string $toolName, array $arguments, string $toolOutput): void
+    {
+        $lastAction = $toolName;
+        $lastFile = null;
+        $lastResult = 'FAILURE';
+
+        // Determine primary argument and last file
+        if (!empty($arguments['path'])) {
+            $lastAction .= ':' . $arguments['path'];
+            $lastFile = $arguments['path'];
+        } elseif (!empty($arguments['command'])) {
+            $lastAction .= ':' . $arguments['command'];
+        }
+
+        // Determine result status
+        if ($toolName === 'execute_shell_command') {
+            $commandResult = json_decode($toolOutput, true);
+            if (isset($commandResult['exit_code']) && $commandResult['exit_code'] === 0) {
+                $lastResult = 'SUCCESS';
+            }
+        } elseif ($toolName === 'search_content') {
+            $lastResult = 'SUCCESS'; // Search is successful even if there are no matches.
+        } else {
+            // For other tools (mostly file-based), check for a generic error message.
+            if (strpos($toolOutput, 'Error:') !== 0) {
+                $lastResult = 'SUCCESS';
+            }
+        }
+
+        $this->sessionContext->current = [
+            'last_action' => $lastAction,
+            'last_result' => $lastResult,
+            'last_file' => $lastFile,
+        ];
     }
 
     private function updateTerminalContext(string $command, string $stdout, string $stderr, int $exitCode): void

@@ -153,10 +153,40 @@ class RunCommand
             }
 
             $processedInput = $this->tui->processInputFiles($input);
+
+            // --- Task Analysis on first run ---
+            if ($this->sessionContext->isNewSession && !empty($processedInput)) {
+                Style::info("First run in session. Analyzing task...");
+                $taskAnalysisPrompt = $this->getTaskAnalysisPrompt($processedInput);
+
+                // Create a temporary client for this one-off call
+                $tempApiClient = ($providerConfig['type'] === 'google')
+                    ? new \AnyllmCli\Infrastructure\Api\Adapter\GeminiClient($providerConfig, $modelName)
+                    : new \AnyllmCli\Infrastructure\Api\Adapter\OpenAiClient($providerConfig, $modelName);
+
+                $taskData = $tempApiClient->simpleChat($taskAnalysisPrompt);
+
+                if ($taskData && is_array($taskData)) {
+                    $this->sessionContext->task = [
+                        'summary' => $taskData['summary'] ?? null,
+                        'type' => $taskData['type'] ?? 'OTHER',
+                        'artifact' => $taskData['artifact'] ?? null,
+                        'stack' => $taskData['stack'] ?? null,
+                        'constraints' => $taskData['constraints'] ?? null,
+                    ];
+                    Style::info("Task identified: " . ($this->sessionContext->task['summary'] ?? 'N/A'));
+                } else {
+                    Style::error("Could not identify task from initial prompt.");
+                    // We can still continue, just without the <task> context
+                }
+                $this->sessionContext->isNewSession = false; // Ensure this only runs once
+            }
+            // ------------------------------------
             
             // Generate the prompt with the latest context right before execution
+            $maxIterations = (int) $this->config->get('agent.max_iterations', 10);
             $systemPrompt = $this->getSystemPrompt($this->sessionContext, $processedInput);
-            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext);
+            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext, $maxIterations);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
@@ -194,12 +224,32 @@ This block contains the summary of the project and conversation history. Use it 
 $sessionXml
 
 **CRITICAL INSTRUCTIONS:**
-1.  You MUST use the provided tools (functions) to interact with the filesystem. Do not ask the user for permission; you are expected to use them.
-2.  Think step-by-step. When the user gives a command, figure out which tool can fulfill the request and call it with the correct arguments.
-3.  If a file path is required, use the relative path from the current working directory.
-4.  When you have completed the user's request or have provided the requested information, simply stop. Do not output a summary message like "I have successfully...".
-5.  Your responses should be concise and directly related to the task.
+1.  **Tool Usage:** You MUST use the provided tools (functions) to interact with the filesystem. Do not ask for permission.
+2.  **Planning:** For complex, multi-step tasks (like creating an application), your first action should be to break the task into a series of smaller steps by calling the `add_todo` tool for each step. After creating the plan, call `list_todos` to show it to the user. Then, execute the plan step-by-step, using `mark_todo_done` after completing each one. For simple, single-step tasks, act directly without planning.
+3.  **Step-by-step Thinking:** When the user gives a command, figure out which tool can fulfill the request and call it with the correct arguments.
+4.  **File Paths:** If a file path is required, use the relative path from the current working directory.
+5.  **Conciseness:** When you have completed the user's request, simply stop. Do not output a summary message like "I have successfully...". Your responses should be concise and directly related to the task.
 PROMPT;
+    }
+
+    private function getTaskAnalysisPrompt(string $userInput): array
+    {
+        $prompt = <<<PROMPT
+You are a task analysis assistant. Analyze the user's request and extract the session goal. Respond ONLY with a valid JSON object with the following keys: "summary", "type", "artifact", "stack", "constraints".
+- "summary": A concise one-sentence summary of the user's goal.
+- "type": The type of task. Choose one from: CREATE, EDIT, DELETE, RUN, EXPLORE, MULTI, OTHER.
+- "artifact": The main noun or artifact being worked on (e.g., "calculator", "user profile page", "database connection").
+- "stack": The primary technology stack if mentioned (e.g., "Python", "React", "PHP"). If not mentioned, use null.
+- "constraints": Any limitations or requirements mentioned (e.g., "without external libraries", "using FastAPI"). If none, use null.
+
+The user's request is:
+"{$userInput}"
+PROMPT;
+
+        return [
+            ['role' => 'system', 'content' => 'You are a helpful assistant designed to output JSON.'],
+            ['role' => 'user', 'content' => $prompt]
+        ];
     }
 }
 

@@ -39,6 +39,22 @@ class SessionContext
     {
         $xml = "<SESSION_CONTEXT>\n";
 
+        if ($this->task) {
+            $xml .= "  <task>\n";
+            $xml .= "    <summary>" . htmlspecialchars($this->task['summary'] ?? '') . "</summary>\n";
+            $xml .= "    <type>" . htmlspecialchars($this->task['type'] ?? '') . "</type>\n";
+            if ($this->task['artifact']) {
+                $xml .= "    <artifact>" . htmlspecialchars($this->task['artifact']) . "</artifact>\n";
+            }
+            if ($this->task['stack']) {
+                $xml .= "    <stack>" . htmlspecialchars($this->task['stack']) . "</stack>\n";
+            }
+            if ($this->task['constraints']) {
+                $xml .= "    <constraints>" . htmlspecialchars($this->task['constraints']) . "</constraints>\n";
+            }
+            $xml .= "  </task>\n";
+        }
+
         if ($this->project) {
             $xml .= "  <project>\n";
             $xml .= "    <name>" . htmlspecialchars($this->project['name']) . "</name>\n";
@@ -104,6 +120,24 @@ class SessionContext
                 $xml .= "    </execution>\n";
             }
             $xml .= "  </terminal>\n";
+        }
+
+        if (!empty($this->todo)) {
+            $xml .= "  <todo>\n";
+            foreach ($this->todo as $item) {
+                $xml .= '    <item status="' . htmlspecialchars($item['status']) . '">' . htmlspecialchars($item['text']) . "</item>\n";
+            }
+            $xml .= "  </todo>\n";
+        }
+
+        if ($this->current) {
+            $xml .= "  <current>\n";
+            $xml .= "    <last_action>" . htmlspecialchars($this->current['last_action']) . "</last_action>\n";
+            $xml .= "    <last_result>" . htmlspecialchars($this->current['last_result']) . "</last_result>\n";
+            if ($this->current['last_file']) {
+                $xml .= "    <last_file>" . htmlspecialchars($this->current['last_file']) . "</last_file>\n";
+            }
+            $xml .= "  </current>\n";
         }
         
         // In the future, other blocks like files, terminal etc., will be added here.

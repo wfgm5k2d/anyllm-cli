@@ -147,4 +147,53 @@ class OpenAiClient implements ApiClientInterface
 
         return new OpenAiResponse($responseContent);
     }
+
+    public function simpleChat(array $messages): ?array
+    {
+        $baseUrl = rtrim($this->config['baseURL'], '/');
+        $url = (strpos($baseUrl, 'chat/completions') !== false) ? $baseUrl : $baseUrl . '/chat/completions';
+
+        $payload = [
+            'model' => $this->modelName,
+            'messages' => $messages,
+            'stream' => false, // No streaming
+            'response_format' => ['type' => 'json_object'], // Ask for JSON output
+        ];
+
+        $jsonPayload = json_encode($payload);
+
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+
+        $headers = [];
+        $confHeaders = $this->config['headers'] ?? $this->config['header'] ?? [];
+        foreach ($confHeaders as $k => $v) {
+            $headers[] = "$k: $v";
+        }
+        if (empty($confHeaders['Content-Type'])) {
+            $headers[] = 'Content-Type: application/json';
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($httpCode >= 400 || $response === false) {
+            Style::errorBox("Task analysis API call failed. HTTP Code: {$httpCode}\nError: {$error}\nResponse: " . substr((string)$response, 0, 500));
+            return null;
+        }
+
+        $decoded = json_decode($response, true);
+        $content = $decoded['choices'][0]['message']['content'] ?? null;
+        if (!$content) {
+            return null;
+        }
+
+        // The response itself is expected to be a JSON string
+        return json_decode($content, true);
+    }
 }
