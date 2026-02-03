@@ -3,11 +3,13 @@
 namespace AnyllmCli\Infrastructure\Terminal;
 
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
+use AnyllmCli\Application\SlashCommand\SlashCommandRegistry;
 
 class TUI
 {
     private TerminalManager $terminalManager;
     private AnylmJsonConfig $config;
+    private SlashCommandRegistry $commandRegistry;
 
     // UI State
     private string $buffer = "";
@@ -16,11 +18,13 @@ class TUI
     private array $currentSuggestions = [];
     private int $menuSelectedIndex = 0;
     private int $terminalWidth = 80;
+    private string $menuType = ''; // To distinguish between '@' and '/'
 
-    public function __construct(TerminalManager $terminalManager, AnylmJsonConfig $config)
+    public function __construct(TerminalManager $terminalManager, AnylmJsonConfig $config, SlashCommandRegistry $commandRegistry)
     {
         $this->terminalManager = $terminalManager;
         $this->config = $config;
+        $this->commandRegistry = $commandRegistry;
         $cols = shell_exec('tput cols');
         if ($cols) {
             $this->terminalWidth = (int)$cols;
@@ -180,6 +184,8 @@ class TUI
 
     private function redraw(): void
     {
+        @file_put_contents(getcwd() . '/tui_log.txt', "--- TUI Redraw ---\nBuffer: '" . $this->buffer . "'\n", FILE_APPEND);
+
         Style::hideCursor();
         echo "\r\033[K";
         Style::prompt();
@@ -189,8 +195,13 @@ class TUI
             echo PHP_EOL;
             foreach ($this->currentSuggestions as $index => $item) {
                 echo "\033[K";
-                $icon = $item['is_dir'] ? "📂  " : "📄  ";
+                $icon = $item['icon'] ?? ' ';
                 $text = $icon . $item['display'];
+                $description = $item['description'] ?? '';
+                if ($description) {
+                    $text .= Style::GRAY . " - " . $description . Style::RESET;
+                }
+                
                 echo ($index === $this->menuSelectedIndex) ? Style::BG_SELECTED . Style::WHITE . "  $text  " . Style::RESET : Style::GRAY . "  $text" . Style::RESET;
                 echo PHP_EOL;
             }
@@ -216,18 +227,35 @@ class TUI
 
     private function renderHighlightedBuffer(): void
     {
-        echo preg_replace_callback('/(@\S+)/u', function ($m) {
-            return Style::BLUE . $m[1] . Style::RESET;
+        // Highlight @mentions and /commands (only the command word)
+        $pattern = '/(@\S+|^\/\S+)/u';
+        echo preg_replace_callback($pattern, function ($m) {
+            return Style::BLUE . $m[0] . Style::RESET;
         }, $this->buffer);
     }
 
     private function prepareSuggestions(): void
     {
+        $logFile = getcwd() . '/tui_log.txt';
+        $log = "--- TUI prepareSuggestions ---\n";
+
         if (preg_match('/@([^\s]*)$/u', $this->buffer, $matches)) {
+            $log .= "Matched @ pattern. Search term: '{$matches[1]}'\n";
+            @file_put_contents($logFile, $log, FILE_APPEND);
             $this->isMenuVisible = true;
+            $this->menuType = '@';
             $this->scanFiles($matches[1]);
+        } elseif (preg_match('/^\/([^\s]*)$/u', $this->buffer, $matches)) {
+            $log .= "Matched / pattern. Search term: '{$matches[1]}'\n";
+            @file_put_contents($logFile, $log, FILE_APPEND);
+            $this->isMenuVisible = true;
+            $this->menuType = '/';
+            $this->scanCommands($matches[1]);
         } else {
+            $log .= "No pattern matched.\n";
+            @file_put_contents($logFile, $log, FILE_APPEND);
             $this->isMenuVisible = false;
+            $this->menuType = '';
         }
     }
 
@@ -262,6 +290,44 @@ class TUI
         if ($this->menuSelectedIndex >= count($this->currentSuggestions)) $this->menuSelectedIndex = 0;
     }
 
+    private function scanCommands(string $searchTerm): void
+    {
+        $logFile = getcwd() . '/tui_log.txt';
+        $log = "--- TUI scanCommands ---\n";
+        $log .= "Search Term: '{$searchTerm}'\n";
+
+        $commands = $this->commandRegistry->getAllCommands();
+        $commandNames = array_map(fn($c) => $c->getName(), $commands);
+        $log .= "Commands from registry: [" . implode(', ', $commandNames) . "]\n";
+
+        $suggestions = [];
+        foreach ($commands as $command) {
+            $commandNameOnly = substr($command->getName(), 1);
+            $match = ($searchTerm === '' || str_starts_with($commandNameOnly, $searchTerm));
+            $log .= "  - Checking '{$commandNameOnly}' against '{$searchTerm}'. Match: " . ($match ? 'YES' : 'NO') . "\n";
+
+            if ($match) {
+                $suggestions[] = [
+                    'name' => $command->getName(),
+                    'display' => $command->getName(),
+                    'description' => $command->getDescription(),
+                    'icon' => '',
+                ];
+            }
+        }
+
+        $log .= "Final suggestions count: " . count($suggestions) . "\n";
+        if (empty($suggestions)) {
+            $log .= "Setting isMenuVisible to false.\n";
+        }
+        @file_put_contents($logFile, $log, FILE_APPEND);
+
+        $this->currentSuggestions = array_slice($suggestions, 0, 7);
+        if (empty($this->currentSuggestions)) {
+            $this->isMenuVisible = false;
+        }
+    }
+
     private function navigateMenu(int $d): void
     {
         if (!$this->isMenuVisible) return;
@@ -274,9 +340,12 @@ class TUI
     private function applyAutocomplete(): void
     {
         if (!$this->isMenuVisible || empty($this->currentSuggestions)) return;
-        $sel = $this->currentSuggestions[$this->menuSelectedIndex];
-        $pos = mb_strrpos($this->buffer, '@');
-        $this->buffer = mb_substr($this->buffer, 0, $pos + 1) . $sel['name'] . (!$sel['is_dir'] ? " " : "");
+        
+        $selected = $this->currentSuggestions[$this->menuSelectedIndex];
+        $searchTerm = ($this->menuType === '@') ? '@' : '/';
+        $pos = mb_strrpos($this->buffer, $searchTerm);
+
+        $this->buffer = mb_substr($this->buffer, 0, $pos) . $selected['name'] . " ";
         $this->cursorPos = mb_strlen($this->buffer);
         $this->isMenuVisible = false;
     }

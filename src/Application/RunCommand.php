@@ -12,6 +12,7 @@ use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use AnyllmCli\Infrastructure\Terminal\TerminalManager;
 use AnyllmCli\Infrastructure\Terminal\TUI;
+use AnyllmCli\Application\SlashCommand\SlashCommandRegistry;
 
 class RunCommand
 {
@@ -25,6 +26,15 @@ class RunCommand
     private bool $isSessionMode = false;
     private SessionContext $sessionContext;
     private bool $isCleanedUp = false;
+    private SlashCommandRegistry $commandRegistry;
+    private ?array $activeProviderConfig = null;
+    private ?string $activeModelName = null;
+
+    // Public getters for commands to access dependencies
+    public function getSessionContext(): SessionContext { return $this->sessionContext; }
+    public function getActiveProviderConfig(): ?array { return $this->activeProviderConfig; }
+    public function getActiveModelName(): ?string { return $this->activeModelName; }
+
 
     public function __construct()
     {
@@ -45,16 +55,25 @@ class RunCommand
 
         $this->config = new AnylmJsonConfig();
         $this->terminalManager = new TerminalManager();
-        $this->tui = new TUI($this->terminalManager, $this->config);
+        $this->commandRegistry = new SlashCommandRegistry();
+        $this->tui = new TUI($this->terminalManager, $this->config, $this->commandRegistry);
         $this->sessionManager = new SessionManager(getcwd());
         $this->repoMapGenerator = new RepoMapGenerator(getcwd());
         $this->projectIdentifierService = new ProjectIdentifierService(getcwd());
         $this->knowledgeBaseService = new KnowledgeBaseService(getcwd());
         $this->sessionContext = new SessionContext();
 
+        $this->registerSlashCommands();
         $this->detectSessionMode();
         $this->setupSignalHandler();
         register_shutdown_function([$this, 'performCleanup']);
+    }
+
+    private function registerSlashCommands(): void
+    {
+        $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ExitCommand());
+        $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ClearCommand());
+        $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SummarizeCommand());
     }
 
     private function setupSignalHandler(): void
@@ -126,14 +145,14 @@ class RunCommand
             exit(0);
         }
 
-        $modelName = $selection['model_name'];
-        $providerConfig = $selection['provider_config'];
+        $this->activeProviderConfig = $selection['provider_config'];
+        $this->activeModelName = $selection['model_name'];
 
         Style::info("Using Provider: " . Style::PURPLE . $selection['provider_name'] . Style::RESET);
         Style::info("Using Model:    " . Style::BOLD . $selection['model_key'] . Style::RESET);
 
         // The system prompt is now generated inside the loop to have the latest context
-        $this->startLoop($providerConfig, $modelName);
+        $this->startLoop($this->activeProviderConfig, $this->activeModelName);
     }
 
     private function startLoop(array $providerConfig, string $modelName): void
@@ -142,16 +161,28 @@ class RunCommand
             $input = $this->tui->readInputTUI();
             if (empty($input)) continue;
 
-            if (in_array($input, ['/exit', '/quit', 'exit', 'quit'])) {
-                echo Style::GRAY . "Goodbye." . Style::RESET . PHP_EOL;
-                break;
-            }
-            if ($input === '/clear') {
-                echo "\033[2J\033[H";
-                Style::banner();
-                continue;
+            // Handle Slash Commands
+            if (str_starts_with($input, '/')) {
+                $parts = explode(' ', $input);
+                $commandName = $parts[0];
+                $args = array_slice($parts, 1);
+
+                if ($commandName === '/exit' || $commandName === '/quit') { // Special case for exit
+                    (new \AnyllmCli\Application\SlashCommand\ExitCommand())->execute([], $this);
+                }
+
+                $command = $this->commandRegistry->find($commandName);
+                if ($command) {
+                    $command->execute($args, $this);
+                    echo PHP_EOL; // Add a newline after command execution
+                    continue; // Go to next loop iteration
+                } else {
+                    Style::error("Unknown command: " . $commandName);
+                    continue;
+                }
             }
 
+            // If not a slash command, proceed with agent execution
             $processedInput = $this->tui->processInputFiles($input);
 
             // --- Task Analysis on first run ---
