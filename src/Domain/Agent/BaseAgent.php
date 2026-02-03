@@ -76,6 +76,8 @@ abstract class BaseAgent implements AgentInterface
 
                 if ($tool) {
                     $toolOutput = "";
+                    $toolSummaryForLlm = "";
+
                     // Special handling for write_file to show a diff
                     if ($toolName === 'write_file') {
                         $path = $arguments['path'] ?? null;
@@ -87,11 +89,34 @@ abstract class BaseAgent implements AgentInterface
 
                         $toolOutput = $tool->execute($arguments);
                         $this->diffRenderer->render($oldContent, $newContent);
+                        $toolSummaryForLlm = $toolOutput; // For write_file, the output is already a summary
 
+                    } elseif ($toolName === 'execute_shell_command') {
+                        $jsonOutput = $tool->execute($arguments);
+                        $commandResult = json_decode($jsonOutput, true);
+
+                        $this->updateTerminalContext(
+                            $commandResult['command'] ?? $arguments['command'],
+                            $commandResult['stdout'],
+                            $commandResult['stderr'],
+                            $commandResult['exit_code']
+                        );
+
+                        // Display output to user
+                        if (!empty($commandResult['stdout'])) {
+                            echo Style::GRAY . "│ STDOUT: " . trim($commandResult['stdout']) . Style::RESET . PHP_EOL;
+                        }
+                        if (!empty($commandResult['stderr'])) {
+                            echo Style::RED . "│ STDERR: " . trim($commandResult['stderr']) . Style::RESET . PHP_EOL;
+                        }
+
+                        $toolSummaryForLlm = $commandResult['summary'];
+                        $toolOutput = $jsonOutput; // Keep the full JSON for logging
                     } else {
                         $toolOutput = $tool->execute($arguments);
                         // Display generic tool output to the user
                         echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
+                        $toolSummaryForLlm = $toolOutput;
                     }
 
                     $this->updateFileContext($toolName, $arguments, $toolOutput);
@@ -102,7 +127,7 @@ abstract class BaseAgent implements AgentInterface
                         'role' => 'tool',
                         'tool_call_id' => $toolCall['id'],
                         'name' => $toolName,
-                        'content' => $toolOutput,
+                        'content' => $toolSummaryForLlm, // Use the summary here
                     ];
 
                 } else {
@@ -121,6 +146,21 @@ abstract class BaseAgent implements AgentInterface
 
         if ($loopCount >= $this->maxIterations) {
             Style::error("Agent reached maximum number of iterations ({$this->maxIterations}).");
+        }
+    }
+
+    private function updateTerminalContext(string $command, string $stdout, string $stderr, int $exitCode): void
+    {
+        $this->sessionContext->terminal[] = [
+            'command' => $command,
+            'stdout' => $stdout,
+            'stderr' => $stderr,
+            'exit_code' => $exitCode,
+        ];
+
+        // Enforce history limit, keeping the most recent 20
+        if (count($this->sessionContext->terminal) > 20) {
+            $this->sessionContext->terminal = array_slice($this->sessionContext->terminal, -20);
         }
     }
 

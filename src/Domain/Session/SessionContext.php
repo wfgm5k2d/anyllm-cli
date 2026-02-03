@@ -89,6 +89,22 @@ class SessionContext
             }
             $xml .= "  </files>\n";
         }
+
+        if (!empty($this->terminal)) {
+            $xml .= "  <terminal>\n";
+            foreach ($this->terminal as $exec) {
+                $xml .= '    <execution exit_code="' . ((int) ($exec['exit_code'] ?? -1)) . '">' . "\n";
+                $xml .= '      <command><![CDATA[' . htmlspecialchars((string) ($exec['command'] ?? '')) . "]]></command>\n";
+                if (!empty($exec['stdout'])) {
+                    $xml .= '      <stdout><![CDATA[' . htmlspecialchars((string) $exec['stdout']) . "]]></stdout>\n";
+                }
+                if (!empty($exec['stderr'])) {
+                    $xml .= '      <stderr><![CDATA[' . htmlspecialchars((string) $exec['stderr']) . "]]></stderr>\n";
+                }
+                $xml .= "    </execution>\n";
+            }
+            $xml .= "  </terminal>\n";
+        }
         
         // In the future, other blocks like files, terminal etc., will be added here.
 

@@ -17,6 +17,7 @@ use AnyllmCli\Infrastructure\Tool\ReadFileTool;
 use AnyllmCli\Infrastructure\Tool\SearchFileContentTool;
 use AnyllmCli\Infrastructure\Tool\ToolRegistry;
 use AnyllmCli\Infrastructure\Tool\WriteFileTool;
+use AnyllmCli\Infrastructure\Tool\ExecuteShellCommandTool;
 use RuntimeException;
 
 class AgentFactory
@@ -35,6 +36,7 @@ class AgentFactory
         $toolRegistry->register(new ReadFileTool());
         $toolRegistry->register(new WriteFileTool());
         $toolRegistry->register(new SearchFileContentTool());
+        $toolRegistry->register(new ExecuteShellCommandTool());
 
         // 2. Create the Diff services
         $diffService = new DiffService();
