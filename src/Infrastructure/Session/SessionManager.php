@@ -12,11 +12,13 @@ class SessionManager implements SessionManagerInterface
 {
     private string $sessionDir;
     private string $contextFile;
+    private string $episodesFile;
 
     public function __construct(string $projectRoot)
     {
         $this->sessionDir = $projectRoot . '/.anyllm';
         $this->contextFile = $this->sessionDir . '/project_context.json';
+        $this->episodesFile = $this->sessionDir . '/episodes.jsonl';
     }
 
     public function initialize(): void
@@ -51,14 +53,65 @@ class SessionManager implements SessionManagerInterface
         return $context;
     }
 
-    public function saveSession(SessionContext $context): void
+    public function saveSession(SessionContext $context, bool $shouldLogHistory = false): void
     {
         // Don't persist the "isNewSession" flag as true
         $context->isNewSession = false;
 
-        $dataToSave = get_object_vars($context);
+        if ($shouldLogHistory) {
+            $this->saveConversationToEpisodes($context->conversation_history, $context->sessionId);
+        }
+
+        // Clean history before saving to project_context to avoid duplication
+        $contextToSave = clone $context;
+        $contextToSave->conversation_history = [];
+
+        $dataToSave = get_object_vars($contextToSave);
         file_put_contents($this->contextFile, json_encode($dataToSave, JSON_PRETTY_PRINT));
 
         Style::info('Session saved');
+    }
+
+    private function saveConversationToEpisodes(array $history, string $sessionId): void
+    {
+        $episode = [
+            'session_id' => $sessionId,
+            'timestamp' => date('c'),
+            'turns' => [],
+        ];
+
+        $currentTurn = [];
+        foreach ($history as $message) {
+            if ($message['role'] === 'system') continue;
+
+            if ($message['role'] === 'user') {
+                if (!empty($currentTurn['user'])) { // If previous turn was not completed, save it
+                    $episode['turns'][] = $currentTurn;
+                }
+                $currentTurn = ['user' => $message['content'], 'assistant' => ''];
+            } elseif ($message['role'] === 'assistant' && isset($currentTurn['assistant'])) {
+                $assistantResponse = '';
+                if (!empty($message['content'])) {
+                    $assistantResponse .= $message['content'];
+                }
+                if (!empty($message['tool_calls'])) {
+                    $toolStrings = [];
+                    foreach ($message['tool_calls'] as $toolCall) {
+                        $func = $toolCall['function'];
+                        $toolStrings[] = "TOOL_CALL: {$func['name']}({$func['arguments']})";
+                    }
+                    $assistantResponse .= implode("\n", $toolStrings);
+                }
+                $currentTurn['assistant'] = trim($assistantResponse);
+            }
+        }
+        // Add the last turn
+        if (!empty($currentTurn['user'])) {
+            $episode['turns'][] = $currentTurn;
+        }
+
+        if (!empty($episode['turns'])) {
+            file_put_contents($this->episodesFile, json_encode($episode) . PHP_EOL, FILE_APPEND);
+        }
     }
 }

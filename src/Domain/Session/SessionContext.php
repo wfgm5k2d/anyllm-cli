@@ -55,6 +55,15 @@ class SessionContext
             $xml .= "  </task>\n";
         }
 
+        if ($this->relevant_history) {
+            $xml .= "  <relevant_history>\n";
+            $xml .= "    <summary>Snippets from past sessions that might be relevant to the current query.</summary>\n";
+            foreach ($this->relevant_history as $line) {
+                $xml .= "    <retrieved_episode><![CDATA[" . htmlspecialchars($line) . "]]></retrieved_episode>\n";
+            }
+            $xml .= "  </relevant_history>\n";
+        }
+
         if ($this->project) {
             $xml .= "  <project>\n";
             $xml .= "    <name>" . htmlspecialchars($this->project['name']) . "</name>\n";

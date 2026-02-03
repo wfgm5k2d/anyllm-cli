@@ -5,6 +5,7 @@ namespace AnyllmCli\Application;
 use AnyllmCli\Application\Factory\AgentFactory;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
+use AnyllmCli\Infrastructure\Service\HistorySearchService;
 use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
 use AnyllmCli\Infrastructure\Service\KnowledgeBaseService;
 use AnyllmCli\Infrastructure\Service\ProjectIdentifierService;
@@ -29,6 +30,7 @@ class RunCommand
     private SlashCommandRegistry $commandRegistry;
     private ?array $activeProviderConfig = null;
     private ?string $activeModelName = null;
+    private string $ragMode = 'none'; // 'none', 'command', or 'llm'
 
     // Public getters for commands to access dependencies
     public function getSessionContext(): SessionContext { return $this->sessionContext; }
@@ -63,10 +65,44 @@ class RunCommand
         $this->knowledgeBaseService = new KnowledgeBaseService(getcwd());
         $this->sessionContext = new SessionContext();
 
+        $this->setupRagMode();
         $this->registerSlashCommands();
         $this->detectSessionMode();
         $this->setupSignalHandler();
         register_shutdown_function([$this, 'performCleanup']);
+    }
+
+    private function setupRagMode(): void
+    {
+        $determinedMode = 'none';
+
+        // Flags have priority
+        if (in_array('--rag-llm', $_SERVER['argv'], true)) {
+            $determinedMode = 'llm';
+        } elseif (in_array('--rag-command', $_SERVER['argv'], true)) {
+            $determinedMode = 'command';
+        } elseif (in_array('--rag', $_SERVER['argv'], true)) {
+            $determinedMode = 'command'; // Default to 'command' mode if only --rag is specified
+        } else {
+            // If no flags, check config file
+            $ragConfig = $this->config->get('rag');
+            if ($ragConfig !== null && is_array($ragConfig)) {
+                // Validate config
+                if (!isset($ragConfig['enable']) || !isset($ragConfig['mode'])) {
+                    Style::errorBox("The 'rag' config is missing required 'enable' or 'mode' keys.\nPlease refer to the documentation: https://anyllm.tech/?p=Memory/rag&lang=ru");
+                    exit(1);
+                }
+                if ((bool)$ragConfig['enable'] === true) {
+                    if (!in_array($ragConfig['mode'], ['llm', 'command'])) {
+                        Style::errorBox("Invalid value for 'rag.mode'. Must be 'llm' or 'command'.\nPlease refer to the documentation: https://anyllm.tech/?p=Memory/rag&lang=ru");
+                        exit(1);
+                    }
+                    $determinedMode = $ragConfig['mode'];
+                }
+            }
+        }
+
+        $this->ragMode = $determinedMode;
     }
 
     private function registerSlashCommands(): void
@@ -74,6 +110,10 @@ class RunCommand
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ExitCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ClearCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SummarizeCommand());
+
+        if ($this->ragMode === 'command' || $this->ragMode === 'llm') {
+            $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SearchHistoryCommand());
+        }
     }
 
     private function setupSignalHandler(): void
@@ -98,7 +138,8 @@ class RunCommand
         }
         $this->terminalManager->restoreMode();
         if ($this->isSessionMode) {
-            $this->sessionManager->saveSession($this->sessionContext);
+            $shouldLogHistory = $this->ragMode !== 'none';
+            $this->sessionManager->saveSession($this->sessionContext, $shouldLogHistory);
         }
         $this->isCleanedUp = true;
     }
@@ -117,6 +158,10 @@ class RunCommand
         if (empty($this->config->get('provider'))) {
             Style::error("No providers configured in anyllm.json");
             exit(1);
+        }
+
+        if ($this->ragMode !== 'none') {
+            Style::info("RAG mode enabled: " . Style::BOLD . $this->ragMode . Style::RESET);
         }
 
         // --- Session Handling ---
@@ -235,6 +280,16 @@ class RunCommand
     {
         $osInfo = php_uname();
         $cwd = getcwd();
+
+        // --- RAG: llm mode ---
+        if ($this->ragMode === 'llm' && !empty($currentInput)) {
+            $historySearch = new HistorySearchService(getcwd());
+            $relevantHistory = $historySearch->search($currentInput);
+            if (!empty($relevantHistory)) {
+                $context->relevant_history = $relevantHistory;
+            }
+        }
+        // ---------------------
 
         // Generate dynamic repo map based on current input
         $mapData = $this->repoMapGenerator->generate($currentInput, $context);
