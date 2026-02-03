@@ -1,27 +1,35 @@
 <?php
 
+declare(strict_types=1);
+
 namespace AnyllmCli\Infrastructure\Terminal;
 
-class Style {
-    const RESET = "\033[0m";
-    const BOLD = "\033[1m";
-    const BLUE = "\033[38;5;39m";
-    const PURPLE = "\033[38;5;135m";
-    const GRAY = "\033[90m";
-    const RED = "\033[31m";
-    const GREEN = "\033[32m";
-    const YELLOW = "\033[33m";
-    const WHITE = "\033[97m";
-    const CYAN = "\033[36m";
+class Style
+{
+    const string RESET = "\033[0m";
+    const string BOLD = "\033[1m";
+    const string BLUE = "\033[38;5;39m";
+    const string PURPLE = "\033[38;5;135m";
+    const string GRAY = "\033[90m";
+    const string RED = "\033[31m";
+    const string GREEN = "\033[32m";
+    const string YELLOW = "\033[33m";
+    const string WHITE = "\033[97m";
+    const string CYAN = "\033[36m";
 
-    const BG_SELECTED = "\033[48;5;236m";
+    const string BG_SELECTED = "\033[48;5;236m";
 
-    public static function clearLine() { echo "\r\033[K"; } 
-    public static function success($text) { echo self::GREEN . "✓ " . $text . self::RESET . PHP_EOL; }
-    public static function hideCursor() { echo "\033[?25l"; }
-    public static function showCursor() { echo "\033[?25h"; }
+    public static function clearLine(): void
+    { echo "\r\033[K"; }
+    public static function success($text): void
+    { echo self::GREEN . "✓ " . $text . self::RESET . PHP_EOL; }
+    public static function hideCursor(): void
+    { echo "\033[?25l"; }
+    public static function showCursor(): void
+    { echo "\033[?25h"; }
 
-    public static function banner() {
+    public static function banner(): void
+    {
         $art = <<<ART
 \033[38;5;39m  ▒▒▒▒▒   ▒▒   ▒▒  ▒▒   ▒▒  ▒▒       ▒▒       ▒▒   ▒▒
 \033[38;5;45m ▒▒   ▒▒  ▒▒▒  ▒▒  ▒▒   ▒▒  ▒▒       ▒▒       ▒▒▒ ▒▒▒
@@ -33,12 +41,17 @@ ART;
         echo self::GRAY . "  AnyLLM v2.5 • Robust AI Terminal" . self::RESET . PHP_EOL . PHP_EOL;
     }
 
-    public static function prompt() { echo self::BLUE . "> " . self::RESET; }
-    public static function info($text) { echo self::GRAY . "• " . $text . self::RESET . PHP_EOL; }
-    public static function tool($text) { echo self::YELLOW . "🛠  " . $text . self::RESET . PHP_EOL; }
-    public static function error($text) { echo self::RED . "Error: " . $text . self::RESET . PHP_EOL; }
+    public static function prompt(): void
+    { echo self::BLUE . "> " . self::RESET; }
+    public static function info($text): void
+    { echo self::GRAY . "• " . $text . self::RESET . PHP_EOL; }
+    public static function tool($text): void
+    { echo self::YELLOW . "🛠  " . $text . self::RESET . PHP_EOL; }
+    public static function error($text): void
+    { echo self::RED . "Error: " . $text . self::RESET . PHP_EOL; }
 
-    public static function errorBox($text) {
+    public static function errorBox($text): void
+    {
         $width = (int)shell_exec('tput cols');
         if ($width < 20) $width = 80;
 
