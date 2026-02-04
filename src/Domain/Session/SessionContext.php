@@ -18,6 +18,7 @@ class SessionContext
     public ?string $repo_map = null;
     public ?string $code_highlights = null;
     public array $conversation_history = [];
+    public array $summarized_history = [];
     public array $files = ['modified' => [], 'read' => [], 'mentioned' => []];
     public array $terminal = [];
     public ?array $decisions = null;
@@ -72,6 +73,17 @@ class SessionContext
                 $xml .= "    <entry_point>" . htmlspecialchars($this->project['entry_point']) . "</entry_point>\n";
             }
             $xml .= "  </project>\n";
+        }
+
+        if (!empty($this->summarized_history)) {
+            $xml .= "  <conversation_history>\n";
+            foreach ($this->summarized_history as $episode) {
+                $xml .= '    <episode timestamp="' . htmlspecialchars($episode['timestamp']) . '">' . "\n";
+                $xml .= '      <request><![CDATA[' . htmlspecialchars($episode['request']) . "]]></request>\n";
+                $xml .= '      <outcome><![CDATA[' . htmlspecialchars($episode['outcome']) . "]]></outcome>\n";
+                $xml .= "    </episode>\n";
+            }
+            $xml .= "  </conversation_history>\n";
         }
 
         if ($this->repo_map) {

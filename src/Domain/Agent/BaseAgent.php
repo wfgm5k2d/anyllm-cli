@@ -31,8 +31,18 @@ abstract class BaseAgent implements AgentInterface
 
     public function execute(string $prompt, callable $onProgress): void
     {
+        // This is the history for the current turn's interaction loop.
+        // It starts with the system prompt (which has the full XML context) and the current user prompt.
+        $messagesForThisTurn = [
+            $this->sessionContext->conversation_history[0], // System prompt
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        // Add the user prompt to the permanent history for logging/saving purposes.
         $this->sessionContext->conversation_history[] = ['role' => 'user', 'content' => $prompt];
 
+        $actionSummaries = [];
+        $finalAssistantContent = null;
         $loopCount = 0;
         $keepGoing = true;
 
@@ -40,133 +50,152 @@ abstract class BaseAgent implements AgentInterface
             $loopCount++;
 
             $response = $this->apiClient->chat(
-                $this->sessionContext->conversation_history,
+                $messagesForThisTurn, // Use the lean, turn-specific history for the API call
                 $this->toolRegistry->getToolsAsJsonSchema(),
                 $onProgress
             );
 
-            $log = "--- Parsed Response ---\n";
-            $log .= "Has Tool Calls: " . ($response->hasToolCalls() ? 'Yes' : 'No') . "\n";
-            $log .= "Message Content: " . ($response->getMessageContent() ?? 'N/A') . "\n";
-            $log .= "Tool Calls: " . json_encode($response->getToolCalls(), JSON_PRETTY_PRINT) . "\n";
-            file_put_contents(getcwd() . '/llm_log.txt', $log . "\n\n", FILE_APPEND);
-
             if (!$response->hasToolCalls()) {
                 // No tool calls, so it's the final answer.
                 $keepGoing = false;
+                $finalAssistantContent = $response->getMessageContent();
                 // The onProgress callback already handled the streaming output.
+                // Log the final message to the permanent history.
+                $this->sessionContext->conversation_history[] = $response->getMessage();
                 continue;
             }
 
-            $this->sessionContext->conversation_history[] = $response->getMessage();
-            $toolCalls = $response->getToolCalls();
+            // Add assistant's response (with tool calls) to both permanent and turn-specific histories.
+            $assistantMessage = $response->getMessage();
+            $this->sessionContext->conversation_history[] = $assistantMessage;
+            $messagesForThisTurn[] = $assistantMessage;
 
+            $toolCalls = $response->getToolCalls();
             $onProgress(PHP_EOL);
 
             foreach ($toolCalls as $toolCall) {
                 $toolName = $toolCall['function']['name'];
                 $arguments = json_decode($toolCall['function']['arguments'], true);
+                $toolSummaryForLlm = "Error: Tool '{$toolName}' did not produce a summary.";
 
                 // --- Intercept internal to-do commands ---
                 if (in_array($toolName, ['add_todo', 'mark_todo_done', 'list_todos'])) {
                     $toolSummaryForLlm = $this->handleTodoCommand($toolName, $arguments);
                     echo Style::GRAY . "│ " . Style::CYAN . "Internal: " . trim($toolSummaryForLlm) . Style::RESET . PHP_EOL;
-
-                    $this->sessionContext->conversation_history[] = [
-                        'role' => 'tool',
-                        'tool_call_id' => $toolCall['id'],
-                        'name' => $toolName,
-                        'content' => $toolSummaryForLlm,
-                    ];
-                    // Update current context after internal command
                     $this->updateCurrentContext($toolName, $arguments, $toolSummaryForLlm);
-                    continue; // Skip the rest of the loop for this tool call
-                }
-                // --- End interception ---
-
-                $log = "--- Tool Execution ---\n";
-                $log .= "Tool Name: " . $toolName . "\n";
-                $log .= "Arguments: " . json_encode($arguments, JSON_PRETTY_PRINT) . "\n";
-                file_put_contents(getcwd() . '/llm_log.txt', $log, FILE_APPEND);
-
-                Style::tool("Using tool: " . Style::BOLD . $toolName . Style::RESET);
-
-                $tool = $this->toolRegistry->getTool($toolName);
-
-                if ($tool) {
-                    $toolOutput = "";
-                    $toolSummaryForLlm = "";
-
-                    // Special handling for write_file to show a diff
-                    if ($toolName === 'write_file') {
-                        $path = $arguments['path'] ?? null;
-                        $newContent = $arguments['content'] ?? '';
-                        $oldContent = '';
-                        if ($path && file_exists(getcwd() . DIRECTORY_SEPARATOR . $path)) {
-                            $oldContent = file_get_contents(getcwd() . DIRECTORY_SEPARATOR . $path);
-                        }
-
-                        $toolOutput = $tool->execute($arguments);
-                        $this->diffRenderer->render($oldContent, $newContent);
-                        $toolSummaryForLlm = $toolOutput; // For write_file, the output is already a summary
-
-                    } elseif ($toolName === 'execute_shell_command') {
-                        $jsonOutput = $tool->execute($arguments);
-                        $commandResult = json_decode($jsonOutput, true);
-
-                        $this->updateTerminalContext(
-                            $commandResult['command'] ?? $arguments['command'],
-                            $commandResult['stdout'],
-                            $commandResult['stderr'],
-                            $commandResult['exit_code']
-                        );
-
-                        // Display output to user
-                        if (!empty($commandResult['stdout'])) {
-                            echo Style::GRAY . "│ STDOUT: " . trim($commandResult['stdout']) . Style::RESET . PHP_EOL;
-                        }
-                        if (!empty($commandResult['stderr'])) {
-                            echo Style::RED . "│ STDERR: " . trim($commandResult['stderr']) . Style::RESET . PHP_EOL;
-                        }
-
-                        $toolSummaryForLlm = $commandResult['summary'];
-                        $toolOutput = $jsonOutput; // Keep the full JSON for logging
-                    } else {
-                        $toolOutput = $tool->execute($arguments);
-                        // Display generic tool output to the user
-                        echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
-                        $toolSummaryForLlm = $toolOutput;
-                    }
-
-                    $this->updateFileContext($toolName, $arguments, $toolOutput);
-                    $this->updateCurrentContext($toolName, $arguments, $toolOutput);
-
-                    file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $toolOutput . "\n\n", FILE_APPEND);
-
-                    $this->sessionContext->conversation_history[] = [
-                        'role' => 'tool',
-                        'tool_call_id' => $toolCall['id'],
-                        'name' => $toolName,
-                        'content' => $toolSummaryForLlm, // Use the summary here
-                    ];
-
                 } else {
-                    $errorOutput = "Error: Tool '{$toolName}' not found.";
-                    file_put_contents(getcwd() . '/llm_log.txt', "Output: " . $errorOutput . "\n\n", FILE_APPEND);
-                    $this->sessionContext->conversation_history[] = [
-                        'role' => 'tool',
-                        'tool_call_id' => $toolCall['id'],
-                        'name' => $toolName,
-                        'content' => $errorOutput,
-                    ];
-                    Style::error("Tool '{$toolName}' not found.");
+                // --- Standard tool execution ---
+                    Style::tool("Using tool: " . Style::BOLD . $toolName . Style::RESET);
+                    $tool = $this->toolRegistry->getTool($toolName);
+
+                    if ($tool) {
+                        $toolOutput = "";
+                        // Special handling for write_file to show a diff
+                        if ($toolName === 'write_file') {
+                            $path = $arguments['path'] ?? null;
+                            $newContent = $arguments['content'] ?? '';
+                            $oldContent = '';
+                            if ($path && file_exists(getcwd() . DIRECTORY_SEPARATOR . $path)) {
+                                $oldContent = file_get_contents(getcwd() . DIRECTORY_SEPARATOR . $path);
+                            }
+                            $toolOutput = $tool->execute($arguments);
+                            $this->diffRenderer->render($oldContent, $newContent);
+                            $toolSummaryForLlm = $toolOutput;
+                        } elseif ($toolName === 'execute_shell_command') {
+                            $jsonOutput = $tool->execute($arguments);
+                            $commandResult = json_decode($jsonOutput, true);
+                            $this->updateTerminalContext($commandResult['command'] ?? $arguments['command'], $commandResult['stdout'], $commandResult['stderr'], $commandResult['exit_code']);
+                            if (!empty($commandResult['stdout'])) echo Style::GRAY . "│ STDOUT: " . trim($commandResult['stdout']) . Style::RESET . PHP_EOL;
+                            if (!empty($commandResult['stderr'])) echo Style::RED . "│ STDERR: " . trim($commandResult['stderr']) . Style::RESET . PHP_EOL;
+                            $toolSummaryForLlm = $commandResult['summary'];
+                            $toolOutput = $jsonOutput;
+                        } else {
+                            $toolOutput = $tool->execute($arguments);
+                            echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
+                            $toolSummaryForLlm = $toolOutput;
+                        }
+                        $this->updateFileContext($toolName, $arguments, $toolOutput);
+                        $this->updateCurrentContext($toolName, $arguments, $toolOutput);
+                    } else {
+                        $toolSummaryForLlm = "Error: Tool '{$toolName}' not found.";
+                        Style::error("Tool '{$toolName}' not found.");
+                    }
                 }
+
+                $actionSummaries[] = $toolSummaryForLlm;
+
+                // Add tool result to both histories
+                $toolMessage = [
+                    'role' => 'tool',
+                    'tool_call_id' => $toolCall['id'],
+                    'name' => $toolName,
+                    'content' => $toolSummaryForLlm,
+                ];
+                $this->sessionContext->conversation_history[] = $toolMessage;
+                $messagesForThisTurn[] = $toolMessage;
             }
         }
 
         if ($loopCount >= $this->maxIterations) {
             Style::error("Agent reached maximum number of iterations ({$this->maxIterations}).");
         }
+
+        // --- Episode Summary Generation ---
+        if ($finalAssistantContent) {
+            $actionSummaries[] = $finalAssistantContent;
+        }
+        $outcome = $this->generateEpisodeOutcome($actionSummaries);
+        $this->sessionContext->summarized_history[] = [
+            'request' => $prompt,
+            'outcome' => $outcome,
+            'timestamp' => date('c'),
+        ];
+    }
+
+    private function generateEpisodeOutcome(array $actionSummaries): string
+    {
+        if (empty($actionSummaries)) {
+            return 'No action taken.';
+        }
+
+        $filesWritten = [];
+        $commandsRun = [];
+        $otherActions = [];
+
+        foreach ($actionSummaries as $summary) {
+            if (str_starts_with($summary, 'Successfully wrote')) { // From WriteFileTool
+                if (preg_match('/to (.*)$/', $summary, $matches)) {
+                    $filesWritten[] = basename($matches[1]);
+                }
+            } elseif (str_starts_with($summary, 'Command `')) { // From ExecuteShellCommandTool
+                if (preg_match('/`([^`]+)`/', $summary, $matches)) {
+                    $commandsRun[] = $matches[1];
+                }
+            } else {
+                $otherActions[] = $summary;
+            }
+        }
+
+        $outcomeParts = [];
+        if (!empty($filesWritten)) {
+            $count = count($filesWritten);
+            $outcomeParts[] = "created/modified {$count} file(s): " . implode(', ', $filesWritten);
+        }
+        if (!empty($commandsRun)) {
+            $outcomeParts[] = "executed command(s): " . implode(', ', $commandsRun);
+        }
+
+        // If there were concrete tool actions, return their summary.
+        if (!empty($outcomeParts)) {
+            return implode('; ', $outcomeParts);
+        }
+
+        // Otherwise, if there were no tool actions, it was probably a text response. Use the last summary.
+        if (!empty($otherActions)) {
+            return end($otherActions);
+        }
+
+        return "Completed a series of actions.";
     }
 
     private function handleTodoCommand(string $toolName, array $arguments): string

@@ -184,8 +184,6 @@ class TUI
 
     private function redraw(): void
     {
-        @file_put_contents(getcwd() . '/tui_log.txt', "--- TUI Redraw ---\nBuffer: '" . $this->buffer . "'\n", FILE_APPEND);
-
         Style::hideCursor();
         echo "\r\033[K";
         Style::prompt();
@@ -236,24 +234,15 @@ class TUI
 
     private function prepareSuggestions(): void
     {
-        $logFile = getcwd() . '/tui_log.txt';
-        $log = "--- TUI prepareSuggestions ---\n";
-
         if (preg_match('/@([^\s]*)$/u', $this->buffer, $matches)) {
-            $log .= "Matched @ pattern. Search term: '{$matches[1]}'\n";
-            @file_put_contents($logFile, $log, FILE_APPEND);
             $this->isMenuVisible = true;
             $this->menuType = '@';
             $this->scanFiles($matches[1]);
         } elseif (preg_match('/^\/([^\s]*)$/u', $this->buffer, $matches)) {
-            $log .= "Matched / pattern. Search term: '{$matches[1]}'\n";
-            @file_put_contents($logFile, $log, FILE_APPEND);
             $this->isMenuVisible = true;
             $this->menuType = '/';
             $this->scanCommands($matches[1]);
         } else {
-            $log .= "No pattern matched.\n";
-            @file_put_contents($logFile, $log, FILE_APPEND);
             $this->isMenuVisible = false;
             $this->menuType = '';
         }
@@ -292,19 +281,12 @@ class TUI
 
     private function scanCommands(string $searchTerm): void
     {
-        $logFile = getcwd() . '/tui_log.txt';
-        $log = "--- TUI scanCommands ---\n";
-        $log .= "Search Term: '{$searchTerm}'\n";
-
         $commands = $this->commandRegistry->getAllCommands();
-        $commandNames = array_map(fn($c) => $c->getName(), $commands);
-        $log .= "Commands from registry: [" . implode(', ', $commandNames) . "]\n";
 
         $suggestions = [];
         foreach ($commands as $command) {
             $commandNameOnly = substr($command->getName(), 1);
             $match = ($searchTerm === '' || str_starts_with($commandNameOnly, $searchTerm));
-            $log .= "  - Checking '{$commandNameOnly}' against '{$searchTerm}'. Match: " . ($match ? 'YES' : 'NO') . "\n";
 
             if ($match) {
                 $suggestions[] = [
@@ -316,12 +298,6 @@ class TUI
             }
         }
 
-        $log .= "Final suggestions count: " . count($suggestions) . "\n";
-        if (empty($suggestions)) {
-            $log .= "Setting isMenuVisible to false.\n";
-        }
-        @file_put_contents($logFile, $log, FILE_APPEND);
-
         $this->currentSuggestions = array_slice($suggestions, 0, 7);
         if (empty($this->currentSuggestions)) {
             $this->isMenuVisible = false;
@@ -332,9 +308,9 @@ class TUI
     {
         if (!$this->isMenuVisible) return;
         $this->menuSelectedIndex += $d;
-        $c = count($this->currentSuggestions);
-        if ($this->menuSelectedIndex < 0) $this->menuSelectedIndex = $c - 1;
-        if ($this->menuSelectedIndex >= $c) $this->menuSelectedIndex = 0;
+        $count = count($this->currentSuggestions);
+        if ($this->menuSelectedIndex < 0) $this->menuSelectedIndex = $count - 1;
+        if ($this->menuSelectedIndex >= $count) $this->menuSelectedIndex = 0;
     }
 
     private function applyAutocomplete(): void
