@@ -22,7 +22,14 @@ class ClearCommand implements SlashCommandInterface
 
     public function execute(array $args, RunCommand $mainApp): void
     {
+        // Clear screen first
         echo "\033[2J\033[H";
         Style::banner();
+
+        // Check if session mode is on and reset if it is
+        if ($mainApp->isSessionMode()) {
+            $mainApp->resetSessionContext();
+            Style::info("Session context has been cleared.");
+        }
     }
 }

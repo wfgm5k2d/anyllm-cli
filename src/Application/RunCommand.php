@@ -37,6 +37,21 @@ class RunCommand
     public function getActiveProviderConfig(): ?array { return $this->activeProviderConfig; }
     public function getActiveModelName(): ?string { return $this->activeModelName; }
 
+    public function isSessionMode(): bool
+    {
+        return $this->isSessionMode;
+    }
+
+    public function resetSessionContext(): void
+    {
+        // Re-create the session context object
+        $this->sessionContext = new SessionContext();
+
+        // Re-run the initial identification steps that happen for a new session
+        $this->sessionContext->project = $this->projectIdentifierService->identify();
+        $this->sessionContext->knowledge_base = $this->knowledgeBaseService->findKnowledge();
+    }
+
 
     public function __construct()
     {
