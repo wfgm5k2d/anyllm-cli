@@ -49,8 +49,10 @@ class ListDirectoryTool implements ToolInterface
         $command = 'ls -F ' . escapeshellarg($fullPath);
         $result = shell_exec($command);
 
+        // shell_exec can return null on error or if the command produces no output.
+        // For an empty directory, no output is valid.
         if ($result === null) {
-            return "Error: Failed to execute 'ls' command.";
+            $result = '';
         }
 
         return "Contents of {$path}:\n" . $result;

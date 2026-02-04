@@ -39,20 +39,25 @@ class ReadFileTool implements ToolInterface
             return "Error: Path is required.";
         }
 
-        $fullPath = getcwd() . DIRECTORY_SEPARATOR . $path;
+        $baseDir = getcwd();
+        $fullPathUnresolved = $baseDir . DIRECTORY_SEPARATOR . $path;
 
-        if (strpos($fullPath, getcwd()) !== 0) {
-            return "Error: Path is outside the current working directory.";
+        // Resolve the real path and check if it's within the CWD
+        $realBaseDir = realpath($baseDir);
+        $realFullPath = realpath($fullPathUnresolved);
+
+        if ($realFullPath === false || strpos($realFullPath, $realBaseDir) !== 0) {
+            // Check for directory traversal even if file doesn't exist yet for the check
+            if (strpos($path, '..') !== false) {
+                 return "Error: Path is outside the current working directory.";
+            }
+             return "Error: File not found at path: {$path}";
         }
 
-        if (!file_exists($fullPath)) {
-            return "Error: File not found at path: {$path}";
-        }
-
-        if (is_dir($fullPath)) {
+        if (is_dir($realFullPath)) {
             return "Error: Path is a directory, not a file: {$path}";
         }
 
-        return file_get_contents($fullPath);
+        return file_get_contents($realFullPath);
     }
 }

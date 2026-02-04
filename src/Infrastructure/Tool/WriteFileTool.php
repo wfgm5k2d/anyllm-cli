@@ -45,20 +45,26 @@ class WriteFileTool implements ToolInterface
             return "Error: Path is required.";
         }
 
-        $fullPath = getcwd() . DIRECTORY_SEPARATOR . $path;
+        $baseDir = getcwd();
+        $fullPathUnresolved = $baseDir . DIRECTORY_SEPARATOR . $path;
 
-        if (strpos($fullPath, getcwd()) !== 0) {
-            return "Error: Path is outside the current working directory.";
-        }
-
-        $dir = dirname($fullPath);
+        // Create the directory first to ensure realpath works
+        $dir = dirname($fullPathUnresolved);
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0777, true)) {
                 return "Error: Failed to create directory: {$dir}";
             }
         }
 
-        if (file_put_contents($fullPath, $content) === false) {
+        // Resolve the real path and check if it's within the CWD
+        $realBaseDir = realpath($baseDir);
+        $realFullPath = realpath($dir);
+
+        if ($realFullPath === false || strpos($realFullPath, $realBaseDir) !== 0) {
+            return "Error: Path is outside the current working directory.";
+        }
+
+        if (file_put_contents($fullPathUnresolved, $content) === false) {
             return "Error: Failed to write to file: {$path}";
         }
 
