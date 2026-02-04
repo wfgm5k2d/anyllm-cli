@@ -125,6 +125,7 @@ class RunCommand
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ExitCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ClearCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SummarizeCommand());
+        $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\InitCommand());
 
         if ($this->ragMode === 'command' || $this->ragMode === 'llm') {
             $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SearchHistoryCommand());
