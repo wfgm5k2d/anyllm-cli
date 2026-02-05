@@ -21,6 +21,8 @@ use AnyllmCli\Infrastructure\Tool\ExecuteShellCommandTool;
 use AnyllmCli\Infrastructure\Tool\AddTodoTool;
 use AnyllmCli\Infrastructure\Tool\MarkTodoDoneTool;
 use AnyllmCli\Infrastructure\Tool\ListTodosTool;
+use AnyllmCli\Application\Agent\SmallAgent;
+use AnyllmCli\Infrastructure\Service\EditBlockParser;
 use RuntimeException;
 
 class AgentFactory
@@ -30,11 +32,13 @@ class AgentFactory
         string $modelName,
         string $systemPrompt,
         SessionContext $sessionContext,
-        int $maxIterations = 10
+        int $maxIterations = 10,
+        array $modelConfig = []
     ): AgentInterface {
         $providerType = $providerConfig['type'] ?? 'openai';
+        $modelType = $modelConfig['type'] ?? 'large';
 
-        // 1. Create the Tool Registry and register all tools
+        // 1. Create the Tool Registry (for large models)
         $toolRegistry = new ToolRegistry();
         $toolRegistry->register(new ListDirectoryTool());
         $toolRegistry->register(new ReadFileTool());
@@ -45,21 +49,31 @@ class AgentFactory
         $toolRegistry->register(new MarkTodoDoneTool());
         $toolRegistry->register(new ListTodosTool());
 
-        // 2. Create the Diff services
+        // 2. Create the Diff services and other shared services
         $diffService = new DiffService();
         $diffRenderer = new DiffRenderer($diffService);
 
-        // 3. Create the appropriate API client and Agent
+        // 3. Create the appropriate API client
         if ($providerType === 'google') {
             $apiClient = new GeminiClient($providerConfig, $modelName);
+        } elseif ($providerType === 'openai' || $providerType === 'openai_compatible') {
+            $apiClient = new OpenAiClient($providerConfig, $modelName);
+        } else {
+            throw new RuntimeException("Unsupported provider type: {$providerType}");
+        }
+
+        // 4. Create the Agent based on model type
+        if ($modelType === 'small') {
+            $editBlockParser = new EditBlockParser($diffRenderer);
+            return new SmallAgent($apiClient, $editBlockParser, $systemPrompt, $sessionContext, $maxIterations);
+        }
+
+        // Default to large model agents
+        if ($providerType === 'google') {
             return new GeminiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt, $sessionContext, $maxIterations);
         }
 
-        if ($providerType === 'openai' || $providerType === 'openai_compatible') {
-            $apiClient = new OpenAiClient($providerConfig, $modelName);
-            return new OpenAiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt, $sessionContext, $maxIterations);
-        }
-
-        throw new RuntimeException("Unsupported provider type: {$providerType}");
+        // Default for openai and openai_compatible
+        return new OpenAiAgent($apiClient, $toolRegistry, $diffRenderer, $systemPrompt, $sessionContext, $maxIterations);
     }
 }

@@ -42,7 +42,8 @@ class TUI
                     'provider_name' => $provData['name'],
                     'provider_config' => array_merge($provData['options'] ?? [], ['type' => $provData['type'] ?? 'openai']),
                     'model_key' => $modelKey,
-                    'model_name' => $modelData['name']
+                    'model_name' => $modelData['name'],
+                    'model_config' => $modelData,
                 ];
             }
         }

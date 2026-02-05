@@ -30,12 +30,14 @@ class RunCommand
     private SlashCommandRegistry $commandRegistry;
     private ?array $activeProviderConfig = null;
     private ?string $activeModelName = null;
+    private ?array $activeModelConfig = null;
     private string $ragMode = 'none'; // 'none', 'command', or 'llm'
 
     // Public getters for commands to access dependencies
     public function getSessionContext(): SessionContext { return $this->sessionContext; }
     public function getActiveProviderConfig(): ?array { return $this->activeProviderConfig; }
     public function getActiveModelName(): ?string { return $this->activeModelName; }
+    public function getActiveModelConfig(): ?array { return $this->activeModelConfig; }
 
     public function isSessionMode(): bool
     {
@@ -208,15 +210,16 @@ class RunCommand
 
         $this->activeProviderConfig = $selection['provider_config'];
         $this->activeModelName = $selection['model_name'];
+        $this->activeModelConfig = $selection['model_config'];
 
         Style::info("Using Provider: " . Style::PURPLE . $selection['provider_name'] . Style::RESET);
         Style::info("Using Model:    " . Style::BOLD . $selection['model_key'] . Style::RESET);
 
         // The system prompt is now generated inside the loop to have the latest context
-        $this->startLoop($this->activeProviderConfig, $this->activeModelName);
+        $this->startLoop($this->activeProviderConfig, $this->activeModelName, $this->activeModelConfig);
     }
 
-    private function startLoop(array $providerConfig, string $modelName): void
+    private function startLoop(array $providerConfig, string $modelName, array $modelConfig): void
     {
         while (true) {
             $input = $this->tui->readInputTUI();
@@ -277,8 +280,13 @@ class RunCommand
             
             // Generate the prompt with the latest context right before execution
             $maxIterations = (int) $this->config->get('agent.max_iterations', 10);
-            $systemPrompt = $this->getSystemPrompt($this->sessionContext, $processedInput);
-            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext, $maxIterations);
+
+            $modelType = $modelConfig['type'] ?? 'large';
+            $systemPrompt = ($modelType === 'small')
+                ? $this->getSmallModelSystemPrompt($this->sessionContext, $processedInput)
+                : $this->getSystemPrompt($this->sessionContext, $processedInput);
+
+            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext, $maxIterations, $modelConfig);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
@@ -290,6 +298,77 @@ class RunCommand
 
             echo PHP_EOL . PHP_EOL;
         }
+    }
+
+    private function getSmallModelSystemPrompt(SessionContext $context, string $currentInput): string
+    {
+        $osInfo = php_uname();
+        $cwd = getcwd();
+
+        // RAG and RepoMap generation logic is the same for all models
+        if ($this->ragMode === 'llm' && !empty($currentInput)) {
+            $historySearch = new HistorySearchService(getcwd());
+            $relevantHistory = $historySearch->search($currentInput);
+            if (!empty($relevantHistory)) {
+                $context->relevant_history = $relevantHistory;
+            }
+        }
+        $mapData = $this->repoMapGenerator->generate($currentInput, $context);
+        $context->repo_map = $mapData['repo_map'];
+        $context->code_highlights = $mapData['code_highlights'];
+        
+        $sessionXml = $context->toXmlPrompt();
+
+        return <<<PROMPT
+You are a powerful AI assistant running in a CLI on a user's local machine. Your primary function is to execute user requests by generating text-based commands to interact with the local filesystem.
+
+**System Information:**
+- Operating System: $osInfo
+
+**SESSION CONTEXT:**
+This block contains the summary of the project and conversation history. Use it to understand the user's goals.
+$sessionXml
+
+**CRITICAL INSTRUCTIONS:**
+1.  **Text-Based Commands:** You MUST use the specific text formats described below to read, write, or edit files. Do not output any other text or explanations.
+2.  **Step-by-step Thinking:** When the user gives a command, figure out what file modifications are needed and generate the correct text blocks.
+3.  **File Paths:** You are operating inside the project root directory. All file paths you provide MUST be relative to the project root (e.g., 'src/main.js' or 'README.md'). Do NOT use absolute paths or include the project directory path itself. Double-check your paths before generating a command.
+
+**AVAILABLE COMMANDS:**
+
+*   **Read a File:**
+    To read a file, you must ask the user to show it to you. For example: "Please show me the content of `src/Application/RunCommand.php`"
+
+*   **Edit a File (SEARCH/REPLACE):**
+    To edit a file, you must specify the file path, then provide a `SEARCH` block and a `REPLACE` block.
+    The `SEARCH` block must be the exact, literal text to find in the file.
+    The `REPLACE` block is the new text that will replace the `SEARCH` block.
+
+    Format:
+    FILE: path/to/your/file.php
+    <<<<<<< SEARCH
+    // The exact code to search for
+    function old_function() {
+        return 1;
+    }
+    =======
+    // The new code to replace it with
+    function new_function() {
+        return 2;
+    }
+    >>>>>>> REPLACE
+
+*   **Write/Create a File (Full Overwrite):**
+    To create a new file or completely overwrite an existing one, use the `[[FILE]]` block.
+
+    Format:
+    [[FILE:path/to/file.ext]]
+    ... file content ...
+    [[ENDFILE]]
+
+Now, wait for the user's command and execute it by generating the appropriate text blocks.
+After all the actions, if you created a file or modified it, read the contents of the file to make sure that all the necessary changes were made and the necessary files exist.
+PROMPT;
     }
 
     private function getSystemPrompt(SessionContext $context, string $currentInput): string
