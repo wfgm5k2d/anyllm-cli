@@ -33,7 +33,8 @@ class AgentFactory
         string $systemPrompt,
         SessionContext $sessionContext,
         int $maxIterations = 10,
-        array $modelConfig = []
+        array $modelConfig = [],
+        ?TerminalManager $terminalManager = null // Kept for compatibility, not used by clients
     ): AgentInterface {
         $providerType = $providerConfig['type'] ?? 'openai';
         $modelType = $modelConfig['type'] ?? 'large';

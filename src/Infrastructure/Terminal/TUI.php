@@ -4,6 +4,7 @@ namespace AnyllmCli\Infrastructure\Terminal;
 
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
 use AnyllmCli\Application\SlashCommand\SlashCommandRegistry;
+use AnyllmCli\Infrastructure\Service\SignalManager;
 
 class TUI
 {
@@ -125,7 +126,7 @@ class TUI
         return $flatList[$selectedIndex];
     }
 
-    public function readInputTUI(): string
+    public function readInputTUI(): ?string
     {
         $this->buffer = "";
         $this->cursorPos = 0;
@@ -134,10 +135,57 @@ class TUI
         $this->redraw();
 
         while (true) {
-            $char = fread(STDIN, 1);
+            // Dispatch any pending signals
+            if (function_exists('pcntl_signal_dispatch')) {
+                pcntl_signal_dispatch();
+            }
+
+            // Check for signals captured by the main signal handler
+            if (SignalManager::$sigintCount > 0) {
+                SignalManager::$sigintCount = 0; // Consume the signal
+
+                static $lastPressTime = 0;
+                $currentTime = time();
+                if ($currentTime - $lastPressTime < 2) {
+                    $this->terminalManager->restoreMode();
+                    echo PHP_EOL . Style::GRAY . "Goodbye." . Style::RESET . PHP_EOL;
+                    exit(0);
+                }
+                $lastPressTime = $currentTime;
+
+                $this->clearMenuArea();
+                echo "\r\033[K" . Style::YELLOW . "Press Ctrl+C again to exit." . Style::RESET;
+                sleep(1);
+                $this->redraw();
+                continue;
+            }
+
+            // Wait for input on STDIN with a timeout
+            $read = [STDIN];
+            $write = null;
+            $except = null;
+            $char = '';
+
+            // Use stream_select to wait for input without blocking the whole script
+            // Suppress warning on interrupted system call, which is expected on SIGINT
+            $result = @stream_select($read, $write, $except, 0, 200000);
+
+            if ($result === false) {
+                // Interrupted by a signal, loop again to dispatch and check flags.
+                continue;
+            }
+            if ($result > 0) {
+                $char = fread(STDIN, 1);
+            } else {
+                // Timeout, loop again
+                continue;
+            }
+
+            if ($char === '') continue;
+
             $ord = ord($char);
 
-            if ($ord === 27) {
+            if ($ord === 27) { // Arrow keys, etc.
                 $seq = fread(STDIN, 2);
                 if ($seq === '[A') $this->navigateMenu(-1);
                 elseif ($seq === '[B') $this->navigateMenu(1);
@@ -151,29 +199,29 @@ class TUI
                 $this->redraw();
                 continue;
             }
-            if ($ord === 10 || $ord === 13) {
+            if ($ord === 10 || $ord === 13) { // Enter key
                 $this->terminalManager->restoreMode();
                 $this->clearMenuArea();
                 echo PHP_EOL;
                 return trim($this->buffer);
             }
-            if ($ord === 9) {
+            if ($ord === 9) { // Tab key
                 $this->applyAutocomplete();
                 $this->redraw();
                 continue;
             }
-            if ($ord === 127 || $ord === 8) {
+            if ($ord === 127 || $ord === 8) { // Backspace
                 if ($this->cursorPos > 0) {
                     $this->buffer = mb_substr($this->buffer, 0, $this->cursorPos - 1) . mb_substr($this->buffer, $this->cursorPos);
                     $this->cursorPos--;
                     $this->menuSelectedIndex = 0;
                 }
             } else {
-                if ($ord >= 192) {
+                if ($ord >= 192) { // Handle multi-byte characters
                     $bytes = ($ord >= 240) ? 3 : (($ord >= 224) ? 2 : 1);
                     $char .= fread(STDIN, $bytes);
                 }
-                if ($ord >= 32) {
+                if ($ord >= 32) { // Printable characters
                     $this->buffer = mb_substr($this->buffer, 0, $this->cursorPos) . $char . mb_substr($this->buffer, $this->cursorPos);
                     $this->cursorPos++;
                     $this->menuSelectedIndex = 0;

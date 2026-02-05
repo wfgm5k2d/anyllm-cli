@@ -6,9 +6,10 @@ use AnyllmCli\Application\Factory\AgentFactory;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Config\AnylmJsonConfig;
 use AnyllmCli\Infrastructure\Service\HistorySearchService;
-use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
 use AnyllmCli\Infrastructure\Service\KnowledgeBaseService;
 use AnyllmCli\Infrastructure\Service\ProjectIdentifierService;
+use AnyllmCli\Infrastructure\Service\RepoMapGenerator;
+use AnyllmCli\Infrastructure\Service\SignalManager;
 use AnyllmCli\Infrastructure\Session\SessionManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use AnyllmCli\Infrastructure\Terminal\TerminalManager;
@@ -32,6 +33,7 @@ class RunCommand
     private ?string $activeModelName = null;
     private ?array $activeModelConfig = null;
     private string $ragMode = 'none'; // 'none', 'command', or 'llm'
+    private bool $requestInterrupted = false;
 
     // Public getters for commands to access dependencies
     public function getSessionContext(): SessionContext { return $this->sessionContext; }
@@ -88,6 +90,24 @@ class RunCommand
         $this->setupSignalHandler();
         register_shutdown_function([$this, 'performCleanup']);
     }
+    
+    private function setupSignalHandler(): void
+    {
+        if (function_exists('pcntl_signal')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGINT, [$this, 'handleSigint']);
+        }
+    }
+
+    public function handleSigint(): void
+    {
+        if (SignalManager::$isAgentRunning) {
+            SignalManager::$cancellationRequested = true;
+        } else {
+            SignalManager::$sigintCount++;
+        }
+    }
+
 
     private function setupRagMode(): void
     {
@@ -134,21 +154,6 @@ class RunCommand
         }
     }
 
-    private function setupSignalHandler(): void
-    {
-        if (function_exists('pcntl_signal')) {
-            pcntl_async_signals(true);
-            pcntl_signal(SIGINT, [$this, 'handleSigint']);
-        }
-    }
-
-    public function handleSigint(): never
-    {
-        echo PHP_EOL . Style::GRAY . "Ctrl+C detected. Shutting down gracefully..." . Style::RESET . PHP_EOL;
-        $this->performCleanup();
-        exit();
-    }
-
     public function performCleanup(): void
     {
         if ($this->isCleanedUp) {
@@ -156,7 +161,7 @@ class RunCommand
         }
         $this->terminalManager->restoreMode();
         if ($this->isSessionMode) {
-            $shouldLogHistory = $this->ragMode !== 'none';
+            $shouldLogHistory = $this->ragMode !== 'none' && !$this->requestInterrupted;
             $this->sessionManager->saveSession($this->sessionContext, $shouldLogHistory);
         }
         $this->isCleanedUp = true;
@@ -222,8 +227,13 @@ class RunCommand
     private function startLoop(array $providerConfig, string $modelName, array $modelConfig): void
     {
         while (true) {
+            $this->requestInterrupted = false;
+            SignalManager::$cancellationRequested = false;
+            SignalManager::$isAgentRunning = false;
+            SignalManager::$sigintCount = 0;
+
             $input = $this->tui->readInputTUI();
-            if (empty($input)) continue;
+            if ($input === null) continue; // TUI was interrupted, loop again
 
             // Handle Slash Commands
             if (str_starts_with($input, '/')) {
@@ -254,12 +264,18 @@ class RunCommand
                 Style::info("First run in session. Analyzing task...");
                 $taskAnalysisPrompt = $this->getTaskAnalysisPrompt($processedInput);
 
-                // Create a temporary client for this one-off call
                 $tempApiClient = ($providerConfig['type'] === 'google')
                     ? new \AnyllmCli\Infrastructure\Api\Adapter\GeminiClient($providerConfig, $modelName)
                     : new \AnyllmCli\Infrastructure\Api\Adapter\OpenAiClient($providerConfig, $modelName);
 
+                SignalManager::$isAgentRunning = true;
                 $taskData = $tempApiClient->simpleChat($taskAnalysisPrompt);
+                SignalManager::$isAgentRunning = false;
+
+                if (SignalManager::$cancellationRequested) {
+                    $this->requestInterrupted = true;
+                    continue; // Skip to next main loop iteration
+                }
 
                 if ($taskData && is_array($taskData)) {
                     $this->sessionContext->task = [
@@ -270,9 +286,8 @@ class RunCommand
                         'constraints' => $taskData['constraints'] ?? null,
                     ];
                     Style::info("Task identified: " . ($this->sessionContext->task['summary'] ?? 'N/A'));
-                } else {
+                } else if (!$this->requestInterrupted) {
                     Style::error("Could not identify task from initial prompt.");
-                    // We can still continue, just without the <task> context
                 }
                 $this->sessionContext->isNewSession = false; // Ensure this only runs once
             }
@@ -290,11 +305,17 @@ class RunCommand
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
+            SignalManager::$isAgentRunning = true;
             $agent->execute($processedInput, function ($chunk) {
+                if ($chunk === '<<INTERRUPTED>>') {
+                    $this->requestInterrupted = true;
+                    return;
+                }
                 echo $chunk;
                 if (ob_get_length()) ob_flush();
                 flush();
             });
+            SignalManager::$isAgentRunning = false;
 
             echo PHP_EOL . PHP_EOL;
         }

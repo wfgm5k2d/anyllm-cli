@@ -7,6 +7,7 @@ namespace AnyllmCli\Infrastructure\Api\Adapter;
 use AnyllmCli\Domain\Api\ApiClientInterface;
 use AnyllmCli\Domain\Api\ApiResponseInterface;
 use AnyllmCli\Infrastructure\Api\Response\GeminiResponse;
+use AnyllmCli\Infrastructure\Service\SignalManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 use stdClass;
 
@@ -46,7 +47,6 @@ class GeminiClient implements ApiClientInterface
                     'role' => 'user',
                     'parts' => [['functionResponse' => [
                         'name' => $message['name'],
-                        // Wrap the raw string output in a JSON object structure
                         'response' => ['content' => (string) $message['content']]
                     ]]],
                 ];
@@ -57,7 +57,6 @@ class GeminiClient implements ApiClientInterface
                 $parts = [];
                 foreach ($message['tool_calls'] as $toolCall) {
                     $decodedArgs = json_decode((string) $toolCall['function']['arguments'], true) ?? [];
-                    // If args are empty, ensure it's an object {} not an array []
                     if (empty($decodedArgs)) {
                         $decodedArgs = new stdClass();
                     }
@@ -87,11 +86,10 @@ class GeminiClient implements ApiClientInterface
             $payload['tools'] = [['functionDeclarations' => $geminiTools]];
         }
 
-        $jsonPayload = json_encode($payload);
-
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
 
         $headers = [];
         $confHeaders = $this->config['headers'] ?? $this->config['header'] ?? [];
@@ -102,7 +100,14 @@ class GeminiClient implements ApiClientInterface
             $headers[] = 'Content-Type: application/json';
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+
+        curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+        curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function () {
+            if (SignalManager::$cancellationRequested) {
+                return -1; // Abort
+            }
+            return 0;
+        });
 
         $responseContent = "";
         $errorBuffer = "";
@@ -136,24 +141,33 @@ class GeminiClient implements ApiClientInterface
                 Style::clearLine();
                 echo Style::GRAY . "Think" . $anim[$animFrame++ % 3] . Style::RESET;
                 usleep(200000);
-            } else {
-                curl_multi_select($mh, 0.1);
+            }
+            if ($active && $status === CURLM_OK) {
+                curl_multi_select($mh);
             }
         } while ($active && $status == CURLM_OK);
 
+        $curl_errno = curl_errno($ch);
+        $responseContent = curl_multi_getcontent($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_multi_close($mh);
 
-        if (curl_errno($ch)) {
+
+        if ($curl_errno === CURLE_ABORTED_BY_CALLBACK) {
+            if ($onProgress) {
+                $onProgress('<<INTERRUPTED>>');
+            }
+            echo PHP_EOL . Style::YELLOW . "Request cancelled." . Style::RESET . PHP_EOL;
+            return new GeminiResponse('{}');
+        }
+
+        if ($curl_errno) {
             $err = curl_error($ch);
-            curl_multi_remove_handle($mh, $ch);
-            curl_multi_close($mh);
             Style::errorBox("Network Error:\n$err");
             return new GeminiResponse('{}');
         }
 
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_multi_remove_handle($mh, $ch);
-        curl_multi_close($mh);
-
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";
             $jsonErr = json_decode($errorBuffer, true);
@@ -166,7 +180,6 @@ class GeminiClient implements ApiClientInterface
             return new GeminiResponse('{}');
         }
 
-        // Simulate streaming for the onProgress callback
         if ($onProgress) {
             $decodedArray = json_decode($responseContent, true);
             if (is_array($decodedArray)) {
@@ -183,10 +196,8 @@ class GeminiClient implements ApiClientInterface
 
     public function simpleChat(array $messages): ?array
     {
-        // Use the non-streaming endpoint for Gemini
         $url = rtrim($this->config['baseURL'], '/') . "/v1beta/models/{$this->modelName}:generateContent";
 
-        // Payload construction is similar to the streaming one
         $payload = [];
         $contents = [];
         $systemInstruction = null;
@@ -195,7 +206,6 @@ class GeminiClient implements ApiClientInterface
              if ($message['role'] === 'system') {
                 $systemInstruction = ['parts' => [['text' => $message['content']]]];
             } else {
-                // Gemini uses 'model' for assistant role
                 $role = $message['role'] === 'assistant' ? 'model' : $message['role'];
                 $contents[] = ['role' => $role, 'parts' => [['text' => $message['content']]]];
             }
@@ -204,17 +214,14 @@ class GeminiClient implements ApiClientInterface
         if ($systemInstruction) {
             $payload['system_instruction'] = $systemInstruction;
         }
-        // Add generationConfig to enforce JSON output for Gemini
         $payload['generationConfig'] = [
             'responseMimeType' => 'application/json',
         ];
 
-        $jsonPayload = json_encode($payload);
-
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
 
         $headers = [];
         $confHeaders = $this->config['headers'] ?? $this->config['header'] ?? [];
@@ -226,10 +233,23 @@ class GeminiClient implements ApiClientInterface
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
+        curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+        curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function () {
+            if (SignalManager::$cancellationRequested) {
+                return -1; // Abort
+            }
+            return 0;
+        });
+
         $response = curl_exec($ch);
+
+        if (curl_errno($ch) === CURLE_ABORTED_BY_CALLBACK) {
+            echo PHP_EOL . Style::YELLOW . "Request cancelled." . Style::RESET . PHP_EOL;
+            return null;
+        }
+
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
-        curl_close($ch);
 
         if ($httpCode >= 400 || $response === false) {
             Style::errorBox("Task analysis API call failed. HTTP Code: {$httpCode}\nError: {$error}\nResponse: " . substr((string)$response, 0, 500));
@@ -237,13 +257,11 @@ class GeminiClient implements ApiClientInterface
         }
 
         $decoded = json_decode($response, true);
-        // Gemini should return the JSON object directly in the 'text' part
         $content = $decoded['candidates'][0]['content']['parts'][0]['text'] ?? null;
         if (!$content) {
             return null;
         }
 
-        // The response text itself is expected to be a JSON string, which we decode again
         return json_decode($content, true);
     }
 }

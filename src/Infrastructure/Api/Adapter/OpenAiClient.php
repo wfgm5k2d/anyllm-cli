@@ -7,6 +7,7 @@ namespace AnyllmCli\Infrastructure\Api\Adapter;
 use AnyllmCli\Domain\Api\ApiClientInterface;
 use AnyllmCli\Domain\Api\ApiResponseInterface;
 use AnyllmCli\Infrastructure\Api\Response\OpenAiResponse;
+use AnyllmCli\Infrastructure\Service\SignalManager;
 use AnyllmCli\Infrastructure\Terminal\Style;
 
 class OpenAiClient implements ApiClientInterface
@@ -50,9 +51,16 @@ class OpenAiClient implements ApiClientInterface
             $payload['tool_choice'] = 'auto';
         }
 
-        $jsonPayload = json_encode($payload);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
 
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+        // Progress function to handle cancellation
+        curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+        curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function () {
+            if (SignalManager::$cancellationRequested) {
+                return -1; // A non-zero return value aborts the transfer.
+            }
+            return 0;
+        });
 
         $responseContent = "";
         $errorBuffer = "";
@@ -74,10 +82,9 @@ class OpenAiClient implements ApiClientInterface
             $responseContent .= $data;
 
             foreach (explode("\n", $data) as $line) {
-                $line = trim($line);
                 if (strpos($line, 'data: ') === 0) {
                     $jsonStr = substr($line, 6);
-                    if ($jsonStr === '[DONE]') continue;
+                    if (trim($jsonStr) === '[DONE]') continue;
 
                     $json = json_decode($jsonStr, true);
                     if (isset($json['choices'][0]['delta']['content'])) {
@@ -91,6 +98,7 @@ class OpenAiClient implements ApiClientInterface
             return strlen($data);
         });
 
+        // Use a multi-handle to add a thinking animation
         $mh = curl_multi_init();
         curl_multi_add_handle($mh, $ch);
         $active = null;
@@ -103,23 +111,32 @@ class OpenAiClient implements ApiClientInterface
                 Style::clearLine();
                 echo Style::GRAY . "Think" . $anim[$animFrame++ % 3] . Style::RESET;
                 usleep(200000);
-            } else {
-                curl_multi_select($mh, 0.1);
+            }
+            if ($active && $status === CURLM_OK) {
+                curl_multi_select($mh);
             }
         } while ($active && $status == CURLM_OK);
 
-        if (curl_errno($ch)) {
+        $curl_errno = curl_errno($ch);
+        curl_multi_remove_handle($mh, $ch);
+        curl_multi_close($mh);
+
+
+        if ($curl_errno === CURLE_ABORTED_BY_CALLBACK) {
+            if ($onProgress) {
+                $onProgress('<<INTERRUPTED>>');
+            }
+            echo PHP_EOL . Style::YELLOW . "Request cancelled." . Style::RESET . PHP_EOL;
+            return new OpenAiResponse('{}');
+        }
+
+        if ($curl_errno) {
             $err = curl_error($ch);
-            curl_multi_remove_handle($mh, $ch);
-            curl_multi_close($mh);
             Style::errorBox("Network Error:\n$err");
             return new OpenAiResponse('{}');
         }
 
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_multi_remove_handle($mh, $ch);
-        curl_multi_close($mh);
-
         if ($httpCode >= 400) {
             $errorMsg = "HTTP Status: $httpCode";
             $jsonErr = json_decode($errorBuffer, true);
@@ -143,16 +160,14 @@ class OpenAiClient implements ApiClientInterface
         $payload = [
             'model' => $this->modelName,
             'messages' => $messages,
-            'stream' => false, // No streaming
-            'response_format' => ['type' => 'json_object'], // Ask for JSON output
+            'stream' => false,
+            'response_format' => ['type' => 'json_object'],
         ];
-
-        $jsonPayload = json_encode($payload);
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $jsonPayload);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
 
         $headers = [];
         $confHeaders = $this->config['headers'] ?? $this->config['header'] ?? [];
@@ -164,10 +179,24 @@ class OpenAiClient implements ApiClientInterface
         }
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 
+        // Progress function to handle cancellation
+        curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+        curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function () {
+            if (SignalManager::$cancellationRequested) {
+                return -1; // Abort
+            }
+            return 0;
+        });
+
         $response = curl_exec($ch);
+
+        if (curl_errno($ch) === CURLE_ABORTED_BY_CALLBACK) {
+            echo PHP_EOL . Style::YELLOW . "Request cancelled." . Style::RESET . PHP_EOL;
+            return null;
+        }
+
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);
-        curl_close($ch);
 
         if ($httpCode >= 400 || $response === false) {
             Style::errorBox("Task analysis API call failed. HTTP Code: {$httpCode}\nError: {$error}\nResponse: " . substr((string)$response, 0, 500));
@@ -180,7 +209,6 @@ class OpenAiClient implements ApiClientInterface
             return null;
         }
 
-        // The response itself is expected to be a JSON string
         return json_decode($content, true);
     }
 }
