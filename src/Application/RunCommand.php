@@ -35,6 +35,13 @@ class RunCommand
     private string $ragMode = 'none'; // 'none', 'command', or 'llm'
     private bool $requestInterrupted = false;
 
+    // --- Statistics Tracking ---
+    private float $startTime;
+    private string $activeModelKey = '';
+    private int $totalPromptTokens = 0;
+    private int $totalCompletionTokens = 0;
+
+
     // Public getters for commands to access dependencies
     public function getSessionContext(): SessionContext { return $this->sessionContext; }
     public function getActiveProviderConfig(): ?array { return $this->activeProviderConfig; }
@@ -56,9 +63,19 @@ class RunCommand
         $this->sessionContext->knowledge_base = $this->knowledgeBaseService->findKnowledge();
     }
 
+    /**
+     * Accumulates token usage for the entire run.
+     */
+    public function addTokens(int $promptTokens, int $completionTokens): void
+    {
+        $this->totalPromptTokens += $promptTokens;
+        $this->totalCompletionTokens += $completionTokens;
+    }
 
     public function __construct()
     {
+        $this->startTime = microtime(true);
+
         // --- Global Handlers ---
         set_error_handler(function ($errno, $errstr, $errfile, $errline) {
             if (!(error_reporting() & $errno)) {
@@ -160,6 +177,22 @@ class RunCommand
             return;
         }
         $this->terminalManager->restoreMode();
+
+        $executionTime = round(microtime(true) - $this->startTime, 2);
+        $totalTokens = $this->totalPromptTokens + $this->totalCompletionTokens;
+
+        if ($totalTokens > 0) {
+            $stats = sprintf(
+                "Model: %s | Total Tokens: %d (prompt: %d, completion: %d) | Execution Time: %.2fs",
+                $this->activeModelKey,
+                $totalTokens,
+                $this->totalPromptTokens,
+                $this->totalCompletionTokens,
+                $executionTime
+            );
+            echo PHP_EOL . Style::GRAY . "📊 " . $stats . Style::RESET . PHP_EOL;
+        }
+
         if ($this->isSessionMode) {
             $shouldLogHistory = $this->ragMode !== 'none' && !$this->requestInterrupted;
             $this->sessionManager->saveSession($this->sessionContext, $shouldLogHistory);
@@ -213,6 +246,7 @@ class RunCommand
             exit(0);
         }
 
+        $this->activeModelKey = $selection['model_key'];
         $this->activeProviderConfig = $selection['provider_config'];
         $this->activeModelName = $selection['model_name'];
         $this->activeModelConfig = $selection['model_config'];
@@ -306,7 +340,7 @@ class RunCommand
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
             SignalManager::$isAgentRunning = true;
-            $agent->execute($processedInput, function ($chunk) {
+            $usageStats = $agent->execute($processedInput, function ($chunk) {
                 if ($chunk === '<<INTERRUPTED>>') {
                     $this->requestInterrupted = true;
                     return;
@@ -316,6 +350,10 @@ class RunCommand
                 flush();
             });
             SignalManager::$isAgentRunning = false;
+
+            if ($usageStats) {
+                $this->addTokens($usageStats->promptTokens, $usageStats->completionTokens);
+            }
 
             echo PHP_EOL . PHP_EOL;
         }

@@ -5,11 +5,12 @@ declare(strict_types=1);
 namespace AnyllmCli\Infrastructure\Api\Response;
 
 use AnyllmCli\Domain\Api\ApiResponseInterface;
-use Exception;
+use AnyllmCli\Domain\Api\UsageStats;
 
 class OpenAiResponse implements ApiResponseInterface
 {
     private array $data;
+    private ?UsageStats $usage = null;
 
     public function __construct(string $jsonResponse)
     {
@@ -30,6 +31,18 @@ class OpenAiResponse implements ApiResponseInterface
                 }
 
                 $chunk = json_decode($jsonStr, true);
+                if (!$chunk) {
+                    continue;
+                }
+
+                // Capture usage statistics, which often come in a late chunk
+                if (isset($chunk['usage'])) {
+                    $this->usage = new UsageStats(
+                        $chunk['usage']['prompt_tokens'] ?? 0,
+                        $chunk['usage']['completion_tokens'] ?? 0
+                    );
+                }
+                
                 $delta = $chunk['choices'][0]['delta'] ?? null;
 
                 if (!$delta) {
@@ -103,5 +116,10 @@ class OpenAiResponse implements ApiResponseInterface
     public function hasToolCalls(): bool
     {
         return isset($this->data['choices'][0]['message']['tool_calls']);
+    }
+
+    public function getUsage(): ?UsageStats
+    {
+        return $this->usage;
     }
 }

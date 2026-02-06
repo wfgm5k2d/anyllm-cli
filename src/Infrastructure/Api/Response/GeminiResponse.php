@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace AnyllmCli\Infrastructure\Api\Response;
 
 use AnyllmCli\Domain\Api\ApiResponseInterface;
+use AnyllmCli\Domain\Api\UsageStats;
 
 class GeminiResponse implements ApiResponseInterface
 {
     private array $data;
+    private ?UsageStats $usage = null;
 
     public function __construct(string $jsonResponse)
     {
@@ -20,7 +22,7 @@ class GeminiResponse implements ApiResponseInterface
         // We first try to decode it as a single JSON array.
         $decodedArray = json_decode($jsonResponse, true);
 
-        if (is_array($decodedArray) && isset($decodedArray[0]['candidates'])) {
+        if (is_array($decodedArray) && (isset($decodedArray[0]['candidates']) || isset($decodedArray[0]['usageMetadata']))) {
             // It's a JSON array of chunks
             $responseChunks = $decodedArray;
         } else {
@@ -41,6 +43,13 @@ class GeminiResponse implements ApiResponseInterface
         foreach ($responseChunks as $chunk) {
             if (isset($chunk['candidates'][0]['content'])) {
                 $fullContent[] = $chunk['candidates'][0]['content'];
+            }
+            // The last chunk in a stream contains the usage metadata
+            if (isset($chunk['usageMetadata'])) {
+                $this->usage = new UsageStats(
+                    $chunk['usageMetadata']['promptTokenCount'] ?? 0,
+                    $chunk['usageMetadata']['candidatesTokenCount'] ?? 0
+                );
             }
         }
 
@@ -120,5 +129,10 @@ class GeminiResponse implements ApiResponseInterface
             }
         }
         return false;
+    }
+
+    public function getUsage(): ?UsageStats
+    {
+        return $this->usage;
     }
 }

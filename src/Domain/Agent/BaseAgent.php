@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AnyllmCli\Domain\Agent;
 
 use AnyllmCli\Domain\Api\ApiClientInterface;
+use AnyllmCli\Domain\Api\UsageStats;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Domain\Tool\ToolRegistryInterface;
 use AnyllmCli\Infrastructure\Terminal\DiffRenderer;
@@ -29,8 +30,10 @@ abstract class BaseAgent implements AgentInterface
         }
     }
 
-    public function execute(string $prompt, callable $onProgress): void
+    public function execute(string $prompt, callable $onProgress): ?UsageStats
     {
+        $turnUsage = new UsageStats();
+
         // This is the history for the current turn's interaction loop.
         // It starts with the system prompt (which has the full XML context) and the current user prompt.
         $messagesForThisTurn = [
@@ -54,6 +57,11 @@ abstract class BaseAgent implements AgentInterface
                 $this->toolRegistry->getToolsAsJsonSchema(),
                 $onProgress
             );
+
+            // Aggregate usage from this API call
+            if ($usage = $response->getUsage()) {
+                $turnUsage->add($usage);
+            }
 
             if (!$response->hasToolCalls()) {
                 // No tool calls, so it's the final answer.
@@ -150,6 +158,8 @@ abstract class BaseAgent implements AgentInterface
             'outcome' => $outcome,
             'timestamp' => date('c'),
         ];
+
+        return $turnUsage;
     }
 
     private function generateEpisodeOutcome(array $actionSummaries): string

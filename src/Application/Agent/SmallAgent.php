@@ -6,6 +6,7 @@ namespace AnyllmCli\Application\Agent;
 
 use AnyllmCli\Domain\Agent\AgentInterface;
 use AnyllmCli\Domain\Api\ApiClientInterface;
+use AnyllmCli\Domain\Api\UsageStats;
 use AnyllmCli\Domain\Session\SessionContext;
 use AnyllmCli\Infrastructure\Service\EditBlockParser;
 
@@ -29,7 +30,7 @@ class SmallAgent implements AgentInterface
         }
     }
 
-    public function execute(string $prompt, callable $onProgress): void
+    public function execute(string $prompt, callable $onProgress): ?UsageStats
     {
         // For small models, the "turn" is the entire conversation history up to this point.
         $messagesForThisTurn = $this->sessionContext->conversation_history;
@@ -58,6 +59,8 @@ class SmallAgent implements AgentInterface
         } else {
             $this->summarizeEpisode($prompt, "No content in assistant's response.");
         }
+
+        return $response->getUsage();
     }
 
     private function updateCurrentContext(string $llmResponse, string $parserOutput): void

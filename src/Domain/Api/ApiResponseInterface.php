@@ -13,4 +13,6 @@ interface ApiResponseInterface
     public function getMessage(): array;
 
     public function hasToolCalls(): bool;
+
+    public function getUsage(): ?UsageStats;
 }

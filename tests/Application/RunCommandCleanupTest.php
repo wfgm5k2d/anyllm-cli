@@ -36,6 +36,7 @@ class RunCommandCleanupTest extends TestCase
         $this->setPrivateProperty($runCommand, 'sessionManager', $sessionManagerMock);
         $this->setPrivateProperty($runCommand, 'terminalManager', $terminalManagerMock);
         $this->setPrivateProperty($runCommand, 'sessionContext', new SessionContext());
+        $this->setPrivateProperty($runCommand, 'startTime', microtime(true)); // Initialize startTime
         $this->setPrivateProperty($runCommand, 'isSessionMode', true);
         $this->setPrivateProperty($runCommand, 'ragMode', 'llm'); // Set a mode where logging would normally occur
         $this->setPrivateProperty($runCommand, 'isCleanedUp', false);
@@ -68,6 +69,7 @@ class RunCommandCleanupTest extends TestCase
         $this->setPrivateProperty($runCommand, 'sessionManager', $sessionManagerMock);
         $this->setPrivateProperty($runCommand, 'terminalManager', $terminalManagerMock);
         $this->setPrivateProperty($runCommand, 'sessionContext', new SessionContext());
+        $this->setPrivateProperty($runCommand, 'startTime', microtime(true)); // Initialize startTime
         $this->setPrivateProperty($runCommand, 'isSessionMode', true);
         $this->setPrivateProperty($runCommand, 'ragMode', 'llm');
         $this->setPrivateProperty($runCommand, 'isCleanedUp', false);
