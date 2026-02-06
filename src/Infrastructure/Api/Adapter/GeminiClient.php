@@ -141,14 +141,12 @@ class GeminiClient implements ApiClientInterface
                 Style::clearLine();
                 echo Style::GRAY . "Think" . $anim[$animFrame++ % 3] . Style::RESET;
                 usleep(200000);
-            }
-            if ($active && $status === CURLM_OK) {
-                curl_multi_select($mh);
+            } else {
+                curl_multi_select($mh, 0.1);
             }
         } while ($active && $status == CURLM_OK);
 
         $curl_errno = curl_errno($ch);
-        $responseContent = curl_multi_getcontent($ch);
         curl_multi_remove_handle($mh, $ch);
         curl_multi_close($mh);
 
