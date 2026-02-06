@@ -163,6 +163,11 @@ class RepoMapGenerator
         return $highlights ?: null;
     }
 
+    public function getFileList(): array
+    {
+        return $this->fileList;
+    }
+
     private function buildTree(array $paths): array
     {
         $tree = [];

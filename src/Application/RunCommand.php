@@ -103,6 +103,10 @@ class RunCommand
         $this->knowledgeBaseService = new KnowledgeBaseService(getcwd());
         $this->sessionContext = new SessionContext();
 
+        // Must be after RepoMapGenerator is created
+        $this->repoMapGenerator->performInitialScan();
+        $this->tui = new TUI($this->terminalManager, $this->config, $this->commandRegistry, $this->repoMapGenerator->getFileList());
+
         $this->setupRagMode();
         $this->registerSlashCommands();
         $this->detectSessionMode();
@@ -242,8 +246,6 @@ class RunCommand
         // --- Knowledge Base ---
         $this->sessionContext->knowledge_base = $this->knowledgeBaseService->findKnowledge();
 
-        // --- Repo Map Generation ---
-        $this->repoMapGenerator->performInitialScan();
         // --------------------------
 
         // Initial model selection

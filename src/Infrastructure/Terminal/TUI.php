@@ -11,6 +11,7 @@ class TUI
     private TerminalManager $terminalManager;
     private AnylmJsonConfig $config;
     private SlashCommandRegistry $commandRegistry;
+    private array $projectFiles;
 
     // UI State
     private string $buffer = "";
@@ -21,11 +22,12 @@ class TUI
     private int $terminalWidth = 80;
     private string $menuType = ''; // To distinguish between '@' and '/'
 
-    public function __construct(TerminalManager $terminalManager, AnylmJsonConfig $config, SlashCommandRegistry $commandRegistry)
+    public function __construct(TerminalManager $terminalManager, AnylmJsonConfig $config, SlashCommandRegistry $commandRegistry, array $projectFiles = [])
     {
         $this->terminalManager = $terminalManager;
         $this->config = $config;
         $this->commandRegistry = $commandRegistry;
+        $this->projectFiles = $projectFiles;
         $cols = shell_exec('tput cols');
         if ($cols) {
             $this->terminalWidth = (int)$cols;
@@ -299,33 +301,26 @@ class TUI
 
     private function scanFiles(string $searchTerm): void
     {
-        $cwd = getcwd();
-        $dir = $cwd;
-        $filePrefix = "";
-        if (strpos($searchTerm, '/') !== false) {
-            $slash = strrpos($searchTerm, '/');
-            $dir .= DIRECTORY_SEPARATOR . substr($searchTerm, 0, $slash);
-            $filePrefix = substr($searchTerm, $slash + 1);
-        } else {
-            $filePrefix = $searchTerm;
+        if (empty($searchTerm)) {
+            $this->isMenuVisible = false;
+            return;
         }
 
-        $files = [];
-        if (is_dir($dir)) {
-            $scan = @scandir($dir);
-            if ($scan) {
-                foreach ($scan as $file) {
-                    if ($file === '.' || $file === '..') continue;
-                    if ($filePrefix !== "" && strpos($file, $filePrefix) !== 0) continue;
-                    $isDir = is_dir($dir . '/' . $file);
-                    $rel = (strpos($searchTerm, '/') !== false ? substr($searchTerm, 0, strrpos($searchTerm, '/') + 1) : '') . $file . ($isDir ? '/' : '');
-                    $files[] = ['name' => $rel, 'display' => $file . ($isDir ? '/' : ''), 'is_dir' => $isDir];
-                }
+        $suggestions = [];
+        foreach ($this->projectFiles as $file) {
+            if (str_contains(strtolower($file), strtolower($searchTerm))) {
+                $suggestions[] = [
+                    'name' => $file,
+                    'display' => $file, // Display the full relative path
+                    'is_dir' => false,
+                ];
             }
         }
-        $this->currentSuggestions = array_slice($files, 0, 7);
-        if (empty($this->currentSuggestions)) $this->isMenuVisible = false;
-        if ($this->menuSelectedIndex >= count($this->currentSuggestions)) $this->menuSelectedIndex = 0;
+
+        $this->currentSuggestions = array_slice($suggestions, 0, 7);
+        if (empty($this->currentSuggestions)) {
+            $this->isMenuVisible = false;
+        }
     }
 
     private function scanCommands(string $searchTerm): void
@@ -370,7 +365,7 @@ class TUI
         $searchTerm = ($this->menuType === '@') ? '@' : '/';
         $pos = mb_strrpos($this->buffer, $searchTerm);
 
-        $this->buffer = mb_substr($this->buffer, 0, $pos) . $selected['name'] . " ";
+        $this->buffer = mb_substr($this->buffer, 0, $pos) . '@' . $selected['name'] . " ";
         $this->cursorPos = mb_strlen($this->buffer);
         $this->isMenuVisible = false;
     }
