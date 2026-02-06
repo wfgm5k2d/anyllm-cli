@@ -2,6 +2,9 @@
 
 AnyLLM CLI is a powerful command-line tool that allows you to interact with various Large Language Models (LLMs) from your terminal.
 
+## Documentation
+[Read on site anyllm.tech](https://anyllm.tech/?p=Overview/index&lang=en)
+
 ## Installation
 
 You can install `anyllm` with a single command. This will download the appropriate binary for your system and place it in `/usr/local/bin`.

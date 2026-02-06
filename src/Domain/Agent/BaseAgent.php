@@ -93,7 +93,12 @@ abstract class BaseAgent implements AgentInterface
                     $this->updateCurrentContext($toolName, $arguments, $toolSummaryForLlm);
                 } else {
                 // --- Standard tool execution ---
-                    Style::tool("Using tool: " . Style::BOLD . $toolName . Style::RESET);
+                    $toolMessage = "Using tool: " . Style::BOLD . $toolName . Style::RESET;
+                    if (!empty($arguments['path'])) {
+                        $toolMessage .= " " . $arguments['path'];
+                    }
+                    Style::tool($toolMessage);
+                    
                     $tool = $this->toolRegistry->getTool($toolName);
 
                     if ($tool) {
@@ -113,13 +118,20 @@ abstract class BaseAgent implements AgentInterface
                             $jsonOutput = $tool->execute($arguments);
                             $commandResult = json_decode($jsonOutput, true);
                             $this->updateTerminalContext($commandResult['command'] ?? $arguments['command'], $commandResult['stdout'], $commandResult['stderr'], $commandResult['exit_code']);
-                            if (!empty($commandResult['stdout'])) echo Style::GRAY . "│ STDOUT: " . trim($commandResult['stdout']) . Style::RESET . PHP_EOL;
-                            if (!empty($commandResult['stderr'])) echo Style::RED . "│ STDERR: " . trim($commandResult['stderr']) . Style::RESET . PHP_EOL;
+                            if (!empty($commandResult['stdout'])) {
+                                $displayStdout = $this->truncateOutput($commandResult['stdout']);
+                                echo Style::GRAY . "│ STDOUT: " . $displayStdout . Style::RESET . PHP_EOL;
+                            }
+                            if (!empty($commandResult['stderr'])) {
+                                $displayStderr = $this->truncateOutput($commandResult['stderr']);
+                                echo Style::RED . "│ STDERR: " . $displayStderr . Style::RESET . PHP_EOL;
+                            }
                             $toolSummaryForLlm = $commandResult['summary'];
                             $toolOutput = $jsonOutput;
                         } else {
                             $toolOutput = $tool->execute($arguments);
-                            echo Style::GRAY . "│ Tool Output: " . trim($toolOutput) . Style::RESET . PHP_EOL;
+                            $displayOutput = $this->truncateOutput($toolOutput);
+                            echo Style::GRAY . "│ Tool Output: " . $displayOutput . Style::RESET . PHP_EOL;
                             $toolSummaryForLlm = $toolOutput;
                         }
                         $this->updateFileContext($toolName, $arguments, $toolOutput);
@@ -160,6 +172,16 @@ abstract class BaseAgent implements AgentInterface
         ];
 
         return $turnUsage;
+    }
+
+    private function truncateOutput(string $output, int $maxLines = 3): string
+    {
+        $trimmedOutput = trim($output);
+        $lines = explode("\n", $trimmedOutput);
+        if (count($lines) > $maxLines) {
+            return implode("\n", array_slice($lines, 0, $maxLines)) . '...';
+        }
+        return $trimmedOutput;
     }
 
     private function generateEpisodeOutcome(array $actionSummaries): string

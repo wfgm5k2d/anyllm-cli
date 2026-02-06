@@ -365,7 +365,12 @@ class TUI
         $searchTerm = ($this->menuType === '@') ? '@' : '/';
         $pos = mb_strrpos($this->buffer, $searchTerm);
 
-        $this->buffer = mb_substr($this->buffer, 0, $pos) . '@' . $selected['name'] . " ";
+        $prefix = '';
+        if ($this->menuType === '@') {
+            $prefix = '@';
+        }
+
+        $this->buffer = mb_substr($this->buffer, 0, $pos) . $prefix . $selected['name'] . " ";
         $this->cursorPos = mb_strlen($this->buffer);
         $this->isMenuVisible = false;
     }
