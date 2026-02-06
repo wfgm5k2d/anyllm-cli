@@ -38,8 +38,7 @@ class RunCommand
     // --- Statistics Tracking ---
     private float $startTime;
     private string $activeModelKey = '';
-    private int $totalPromptTokens = 0;
-    private int $totalCompletionTokens = 0;
+    private array $tokenUsageByModel = [];
 
 
     // Public getters for commands to access dependencies
@@ -64,12 +63,15 @@ class RunCommand
     }
 
     /**
-     * Accumulates token usage for the entire run.
+     * Accumulates token usage for the entire run, tracked per model.
      */
-    public function addTokens(int $promptTokens, int $completionTokens): void
+    public function addTokens(string $modelKey, int $promptTokens, int $completionTokens): void
     {
-        $this->totalPromptTokens += $promptTokens;
-        $this->totalCompletionTokens += $completionTokens;
+        if (!isset($this->tokenUsageByModel[$modelKey])) {
+            $this->tokenUsageByModel[$modelKey] = ['prompt' => 0, 'completion' => 0];
+        }
+        $this->tokenUsageByModel[$modelKey]['prompt'] += $promptTokens;
+        $this->tokenUsageByModel[$modelKey]['completion'] += $completionTokens;
     }
 
     public function __construct()
@@ -163,6 +165,7 @@ class RunCommand
     {
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ExitCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ClearCommand());
+        $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\ModelsCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\SummarizeCommand());
         $this->commandRegistry->register(new \AnyllmCli\Application\SlashCommand\InitCommand());
 
@@ -179,19 +182,23 @@ class RunCommand
         $this->terminalManager->restoreMode();
 
         $executionTime = round(microtime(true) - $this->startTime, 2);
-        $totalTokens = $this->totalPromptTokens + $this->totalCompletionTokens;
 
-        if ($totalTokens > 0) {
-            $stats = sprintf(
-                "Model: %s | Total Tokens: %d (prompt: %d, completion: %d) | Execution Time: %.2fs",
-                $this->activeModelKey,
-                $totalTokens,
-                $this->totalPromptTokens,
-                $this->totalCompletionTokens,
-                $executionTime
-            );
-            echo PHP_EOL . Style::GRAY . "📊 " . $stats . Style::RESET . PHP_EOL;
+        if (!empty($this->tokenUsageByModel)) {
+            echo PHP_EOL . Style::GRAY . "📊  Session Statistics:" . Style::RESET . PHP_EOL;
+            foreach ($this->tokenUsageByModel as $modelKey => $usage) {
+                $total = $usage['prompt'] + $usage['completion'];
+                $stats = sprintf(
+                    "   - %s | Total: %d (prompt: %d, completion: %d)",
+                    $modelKey,
+                    $total,
+                    $usage['prompt'],
+                    $usage['completion']
+                );
+                echo Style::GRAY . $stats . Style::RESET . PHP_EOL;
+            }
+            echo Style::GRAY . "   Total Execution Time: " . $executionTime . "s" . Style::RESET . PHP_EOL;
         }
+
 
         if ($this->isSessionMode) {
             $shouldLogHistory = $this->ragMode !== 'none' && !$this->requestInterrupted;
@@ -239,11 +246,28 @@ class RunCommand
         $this->repoMapGenerator->performInitialScan();
         // --------------------------
 
+        // Initial model selection
+        $this->switchModel(true);
+
+        // The system prompt is now generated inside the loop to have the latest context
+        $this->startLoop();
+    }
+
+    public function switchModel(bool $isInitial = false): void
+    {
+        if (!$isInitial) {
+             echo PHP_EOL; // Add space before showing the menu
+        }
+
         $selection = $this->tui->selectModelTUI();
 
         if (!$selection) {
-            echo Style::GRAY . "Exit." . Style::RESET . PHP_EOL;
-            exit(0);
+            if ($isInitial) {
+                echo Style::GRAY . "Exit." . Style::RESET . PHP_EOL;
+                exit(0);
+            }
+            Style::info("Model selection cancelled.");
+            return;
         }
 
         $this->activeModelKey = $selection['model_key'];
@@ -253,12 +277,9 @@ class RunCommand
 
         Style::info("Using Provider: " . Style::PURPLE . $selection['provider_name'] . Style::RESET);
         Style::info("Using Model:    " . Style::BOLD . $selection['model_key'] . Style::RESET);
-
-        // The system prompt is now generated inside the loop to have the latest context
-        $this->startLoop($this->activeProviderConfig, $this->activeModelName, $this->activeModelConfig);
     }
 
-    private function startLoop(array $providerConfig, string $modelName, array $modelConfig): void
+    private function startLoop(): void
     {
         while (true) {
             $this->requestInterrupted = false;
@@ -298,9 +319,9 @@ class RunCommand
                 Style::info("First run in session. Analyzing task...");
                 $taskAnalysisPrompt = $this->getTaskAnalysisPrompt($processedInput);
 
-                $tempApiClient = ($providerConfig['type'] === 'google')
-                    ? new \AnyllmCli\Infrastructure\Api\Adapter\GeminiClient($providerConfig, $modelName)
-                    : new \AnyllmCli\Infrastructure\Api\Adapter\OpenAiClient($providerConfig, $modelName);
+                $tempApiClient = ($this->activeProviderConfig['type'] === 'google')
+                    ? new \AnyllmCli\Infrastructure\Api\Adapter\GeminiClient($this->activeProviderConfig, $this->activeModelName)
+                    : new \AnyllmCli\Infrastructure\Api\Adapter\OpenAiClient($this->activeProviderConfig, $this->activeModelName);
 
                 SignalManager::$isAgentRunning = true;
                 $taskData = $tempApiClient->simpleChat($taskAnalysisPrompt);
@@ -330,12 +351,12 @@ class RunCommand
             // Generate the prompt with the latest context right before execution
             $maxIterations = (int) $this->config->get('agent.max_iterations', 10);
 
-            $modelType = $modelConfig['type'] ?? 'large';
+            $modelType = $this->activeModelConfig['type'] ?? 'large';
             $systemPrompt = ($modelType === 'small')
                 ? $this->getSmallModelSystemPrompt($this->sessionContext, $processedInput)
                 : $this->getSystemPrompt($this->sessionContext, $processedInput);
 
-            $agent = AgentFactory::create($providerConfig, $modelName, $systemPrompt, $this->sessionContext, $maxIterations, $modelConfig);
+            $agent = AgentFactory::create($this->activeProviderConfig, $this->activeModelName, $systemPrompt, $this->sessionContext, $maxIterations, $this->activeModelConfig);
 
             echo PHP_EOL . Style::PURPLE . "✦ " . Style::RESET;
 
@@ -352,7 +373,7 @@ class RunCommand
             SignalManager::$isAgentRunning = false;
 
             if ($usageStats) {
-                $this->addTokens($usageStats->promptTokens, $usageStats->completionTokens);
+                $this->addTokens($this->activeModelKey, $usageStats->promptTokens, $usageStats->completionTokens);
             }
 
             echo PHP_EOL . PHP_EOL;
